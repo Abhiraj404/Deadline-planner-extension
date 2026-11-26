@@ -1,0 +1,263 @@
+/* Chromium sizes the popup to its content, up to 800×600. The page itself never
+   scrolls: the main area scrolls inside a max-height column, so a scrollbar can never
+   push content sideways. */
+body.popup {
+  width: 380px;
+  min-width: 300px;
+  max-width: 100vw;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.popup-app {
+  display: flex;
+  flex-direction: column;
+  max-height: 600px;
+  min-height: 200px;
+}
+
+.popup-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.header-actions {
+  display: flex;
+  gap: var(--space-0);
+}
+
+.popup-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+}
+
+.popup-error {
+  margin: var(--space-4);
+}
+
+/* Next deadline */
+.next-up {
+  min-width: 0;
+}
+
+.next-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  text-align: left;
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.next-card:hover {
+  border-color: var(--color-accent);
+}
+
+.next-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: 2px;
+}
+
+.next-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.next-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+.next-meta {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.next-up > .next-label {
+  display: block;
+  padding: var(--space-3) var(--space-4) 0;
+}
+
+.next-up:has(.next-empty) {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.next-empty {
+  padding: var(--space-1) var(--space-4) var(--space-3);
+  font-size: var(--text-md);
+  color: var(--color-text-secondary);
+}
+
+/* Stats */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--space-2) var(--space-3);
+}
+
+.stat + .stat {
+  border-left: 1px solid var(--color-border);
+}
+
+.stat-value {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.stat.is-warning .stat-value {
+  color: var(--color-warning);
+}
+
+/* Actions */
+.popup-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.add-button {
+  flex: 1;
+}
+
+.quick-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.quick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.quick-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.quick-actions .btn-ghost {
+  margin-right: auto;
+  padding-left: 0;
+  color: var(--color-accent-text);
+}
+
+/* List */
+.list-tools {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-1);
+}
+
+.list-tools .input {
+  height: 32px;
+}
+
+.list-tools .segment {
+  padding: 0 var(--space-2);
+}
+
+.popup .card-list {
+  padding-bottom: var(--space-2);
+}
+
+.popup .empty-state {
+  padding: var(--space-6) var(--space-4);
+}
+
+.popup-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-1);
+  border-top: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.popup-footer .btn {
+  color: var(--color-text-secondary);
+}
+
+/* Dialogs fill the small popup window. */
+.popup .dialog {
+  width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+}
+
+.popup .dialog-body {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.popup .dialog-header {
+  padding-left: var(--space-4);
+}
+
+.popup .segment {
+  padding: 0 var(--space-2);
+}
+
+@media (max-width: 340px) {
+  .list-tools {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A modal dialog does not enlarge the popup window, so reserve room while one is open. */
+body.popup:has(dialog[open]) .popup-app {
+  min-height: 560px;
+}

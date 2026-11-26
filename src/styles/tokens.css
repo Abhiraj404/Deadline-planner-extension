@@ -1,0 +1,108 @@
+/*
+ * Design tokens. Every colour is a light-dark() pair, so one set of variables serves
+ * both themes. <html data-theme="light|dark"> forces a theme; without the attribute
+ * the browser's colour-scheme preference decides ("system").
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Typography: system fonts only, no network fonts. */
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --leading-tight: 1.25;
+  --leading: 1.5;
+
+  /* Spacing (4 px scale). */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Radii. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* Motion. */
+  --duration-fast: 100ms;
+  --duration: 160ms;
+  --duration-slow: 240ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Surfaces. */
+  --color-bg: light-dark(#f7f7f9, #0d0d10);
+  --color-surface: light-dark(#ffffff, #151519);
+  --color-surface-raised: light-dark(#ffffff, #1b1b20);
+  --color-surface-sunken: light-dark(#f1f1f4, #111114);
+  --color-surface-hover: light-dark(#f4f4f7, #1f1f25);
+  --color-surface-active: light-dark(#ececf1, #26262d);
+
+  /* Borders. */
+  --color-border: light-dark(#e6e6eb, #26262d);
+  --color-border-strong: light-dark(#d4d4dc, #34343d);
+
+  /* Text. All pairs meet WCAG AA (4.5:1) on --color-surface. */
+  --color-text: light-dark(#17171c, #ededf2);
+  --color-text-secondary: light-dark(#4f4f5a, #a8a8b3);
+  --color-text-tertiary: light-dark(#6b6b76, #8c8c97);
+
+  /* Accent (indigo-violet). */
+  --color-accent: light-dark(#5a4de6, #6a5ef0);
+  --color-accent-hover: light-dark(#4b3fd6, #5d51e4);
+  --color-accent-text: light-dark(#4a3dd4, #aaa3ff);
+  --color-accent-soft: light-dark(#efedfe, #221f3d);
+  --color-on-accent: #ffffff;
+
+  /* Status. */
+  --color-danger: light-dark(#c42b39, #f2777f);
+  --color-danger-soft: light-dark(#fdeced, #3a1619);
+  --color-warning: light-dark(#9a5700, #f0b35a);
+  --color-warning-soft: light-dark(#fff3df, #33240c);
+  --color-success: light-dark(#13764a, #57c995);
+  --color-success-soft: light-dark(#e5f5ec, #102a1d);
+
+  /* Shadows: kept subtle; borders do most of the separation. */
+  --shadow-color: light-dark(rgb(20 20 40 / 0.08), rgb(0 0 0 / 0.45));
+  --shadow-sm: 0 1px 2px var(--shadow-color);
+  --shadow-md: 0 4px 14px var(--shadow-color), 0 1px 3px var(--shadow-color);
+  --shadow-lg: 0 18px 50px light-dark(rgb(20 20 40 / 0.18), rgb(0 0 0 / 0.6));
+
+  --focus-ring: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-accent);
+  --backdrop: light-dark(rgb(20 20 30 / 0.32), rgb(0 0 0 / 0.6));
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration: 0ms;
+    --duration-slow: 0ms;
+  }
+}
