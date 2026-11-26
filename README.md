@@ -199,7 +199,7 @@ Then load the `dist` folder with **Load unpacked** as above.
 
 ## Testing
 
-- **218 automated tests** (Vitest): reminders (scheduling, cancellation, updates,
+- **225 automated tests** (Vitest): reminders (scheduling, cancellation, updates,
   completion, restart reconciliation, missed reminders, duplicate prevention, snooze,
   time zones, daylight saving, date-only deadlines), the service-worker reminder flow
   with mocked `chrome.*` APIs, storage and migrations, backup/restore, demo data,

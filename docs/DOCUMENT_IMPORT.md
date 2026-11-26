@@ -70,20 +70,20 @@ or plain text and returns one or more **assessment candidates**. Rules are porte
 the original Python Deadline Planner (`assessment_extraction.py`) and its shared
 fixtures (`tests/fixtures/extraction-cases.json`), then extended.
 
-| Field                                        | Rule                                                                                                                                                                                  |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title                                        | `Assessment title:` / `Title:` labels (high); otherwise a leading `CA2 …`, `Assignment 3 …` line (medium).                                                                            |
-| Module name / code                           | `Module:` label; a code such as `COMP3010` at its start or a `Module code:` label.                                                                                                    |
-| Assessment type                              | `Assessment type:` label (high), otherwise keywords in the title (medium): exam, presentation, group project, lab, assignment.                                                        |
-| Weighting                                    | `Weighting: 40%`, `40% of the module grade` (high), `worth 40%` (medium). Several different percentages → low, with the alternatives listed.                                          |
-| Submission deadline                          | Dates labelled as submission (see below). Set only when exactly one distinct submission date exists.                                                                                  |
-| Submission time                              | The nearest time on the same line, within 40 characters of the date.                                                                                                                  |
-| Submission method                            | `Submission method:` label (high), or "submit via/through/on Moodle, Brightspace, Turnitin, Teams, email…" (medium).                                                                  |
-| Deliverables, marking criteria, instructions | Items (bullets, list items, table rows, short lines) under headings such as _Deliverables_, _Marking criteria_, _Rubric_, _Instructions_; also lines starting `Important:` / `Note:`. |
-| Word count                                   | `Word count: 2,000–2,500`, `max 1500 words`, `1,500-word essay`.                                                                                                                      |
-| Presentation date / duration                 | Dates labelled as presentation; `10 minutes`, `15–20 minutes` on a presentation line or after `Duration:`.                                                                            |
-| Group size                                   | `Group size: 3–5`, `groups of 3 to 4`, `4-person teams`, or "individual".                                                                                                             |
-| Other dates                                  | Release, feedback, late submission, examination, revision and unlabelled dates.                                                                                                       |
+| Field                                        | Rule                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title                                        | `Assessment title:` / `Title:` labels (high; blank form fields such as `Title: ____` are ignored); otherwise the CA heading with weighting, release and semester parts removed (`River Studies – CA1 – 30% – Mapping` → `CA1 – Mapping`, medium); otherwise a leading `CA2 …`, `Assignment 3 …` line that is not a table row (medium). |
+| Module name / code                           | `Module:` label (table words such as `PER WEEK` ignored); otherwise the text before the CA heading or the line just above it, without `– Stage 2` suffixes and never an institution/programme line (medium); a code such as `COMP3010` at its start or a `Module code:` label.                                                         |
+| Assessment type                              | `Assessment type:` label (high), otherwise keywords in the title (medium): exam, presentation, group project, lab, assignment. "Group project", "Group CA" or "Group based" near the top makes it a group project.                                                                                                                     |
+| Weighting                                    | `Weighting: 40%`, `40% of the module grade` (high), `worth 40%`, `CA1 – 30%`, `CA2 (30%)`, `Marks awarded: (30%)` (medium). Several different percentages → low, with the alternatives listed.                                                                                                                                         |
+| Submission deadline                          | Dates labelled as submission (see below). Set only when exactly one distinct submission date exists.                                                                                                                                                                                                                                   |
+| Submission time                              | The nearest time on the same line, within 40 characters of the date (`17:00`, `5pm`, `6.pm`, `5 p.m.`).                                                                                                                                                                                                                                |
+| Submission method                            | `Submission method:` label (high), or "submit via/through/on Moodle, Brightspace, Turnitin, Teams, email…" (medium).                                                                                                                                                                                                                   |
+| Deliverables, marking criteria, instructions | Items (bullets, list items, table rows, short lines) under headings such as _Deliverables_, _Marking criteria_, _Rubric_, _Marks will be awarded as follows_, _Instructions_; also lines starting `Important:` / `Note:`.                                                                                                              |
+| Word count                                   | `Word count: 2,000–2,500`, `max 1500 words`, `1,500-word essay`.                                                                                                                                                                                                                                                                       |
+| Presentation date / duration                 | Dates labelled as presentation; `10 minutes`, `15–20 minutes` on a presentation line or after `Duration:`.                                                                                                                                                                                                                             |
+| Group size                                   | `Group size: 3–5`, `groups of 3 to 4`, `4-person teams`, or "individual".                                                                                                                                                                                                                                                              |
+| Other dates                                  | Release, feedback, late submission, examination, revision and unlabelled dates.                                                                                                                                                                                                                                                        |
 
 **Several assessments in one document:** if at least two short heading lines such as
 `CA1 – …`, `Assignment 2`, `Part B` each start a section that contains its own
@@ -113,6 +113,9 @@ Times: `17:00`, `17.00`, `5pm`, `5 PM`, `5:30 p.m.`, `11:59 PM`, `12 noon`, `mid
 - **Weekday only.** `Due by Friday at 5 PM` suggests the next two Fridays after the import
   date and is never chosen automatically.
 - **Two-digit years** become 20xx with medium confidence.
+- **Year after the time** (`16th December 5pm - 2027`) is used, with medium confidence and a note.
+- **Dates to be confirmed.** "Exact dates to be confirmed" / TBC / TBA adds a warning.
+- **Repeated deadline.** The same submission date repeated in a later part does not split the brief into several assessments.
 - **Invalid dates** (`31/02/2027`) are ignored and reported in the warnings.
 - **Weekday mismatch** (`Monday 11 December 2026` when it is a Friday) → low confidence.
 - **Midnight** is read as 23:59 on that date, with a note and medium confidence.
@@ -126,16 +129,16 @@ The closest classifying phrase before the date on the same line wins (a longer p
 wins a tie, so "late submission" beats "submission"). If nothing precedes the date, the
 line above is used (table layouts). Otherwise a phrase shortly after the date is used.
 
-| Label           | Phrases                                                                                                                                       |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Submission      | submission deadline/date/closes, final submission, submit … by/before/on, deadline, due, due date, due by, hand in, closing date, upload … by |
-| Presentation    | presentation, viva, demonstration, demo, pitch, interview                                                                                     |
-| Late submission | late submission, extension, penalty, grace period                                                                                             |
-| Feedback        | feedback, results/grades/marks (will be) released/returned/published                                                                          |
-| Release         | released, issue date, published, handed out, available from                                                                                   |
-| Examination     | exam, examination, class test, quiz                                                                                                           |
-| Revision        | revision (week/session/lecture/class), review session                                                                                         |
-| Other           | anything else; "due to" is never a deadline                                                                                                   |
+| Label           | Phrases                                                                                                                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Submission      | submission deadline/date/closes, final submission, submit … by/before/on, deadline, due, due date, due by, hand in, closing date, upload … by, upload date, completion (and upload/submission) date |
+| Presentation    | presentation, viva, demonstration, demo, pitch, interview                                                                                                                                           |
+| Late submission | late submission, extension, penalty, grace period                                                                                                                                                   |
+| Feedback        | feedback, results/grades/marks (will be) released/returned/published                                                                                                                                |
+| Release         | released, issue date, published, handed out, available from                                                                                                                                         |
+| Examination     | exam, examination, class test, quiz                                                                                                                                                                 |
+| Revision        | revision (week/session/lecture/class), review session                                                                                                                                               |
+| Other           | anything else; "due to" is never a deadline                                                                                                                                                         |
 
 ## Confidence indicators
 

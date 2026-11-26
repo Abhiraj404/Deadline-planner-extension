@@ -74,9 +74,13 @@ const DATE_PATTERNS = [
   ],
 ];
 
-/** 17:00, 17.00, 5pm, 5:30 p.m., 11:59 PM, noon, midday, midnight. */
+/** 17:00, 17.00, 5pm, 6.pm, 5:30 p.m., 11:59 PM, noon, midday, midnight. */
 const TIME_PATTERN =
-  /\b(?:(?<hour>[01]?\d|2[0-3])[:.](?<minute>[0-5]\d)\s*(?<meridiem>[ap]\.?m\.?)?|(?<hour12>1[0-2]|0?[1-9])\s*(?<meridiem12>[ap]\.?m\.?)|(?<word>midday|noon|midnight))(?!\w)/gi;
+  /\b(?:(?<hour>[01]?\d|2[0-3])[:.](?<minute>[0-5]\d)\s*(?<meridiem>[ap]\.?m\.?)?|(?<hour12>1[0-2]|0?[1-9])\s*\.?(?<meridiem12>[ap]\.?m\.?)|(?<word>midday|noon|midnight))(?!\w)/gi;
+
+/** A year written after the time instead of the date: "16th December 5pm - 2027". */
+const YEAR_AFTER_TIME =
+  /^\s*(?:,|at|@)?\s*(?:(?:[01]?\d|2[0-3])[:.][0-5]\d\s*(?:[ap]\.?m\.?)?|(?:1[0-2]|0?[1-9])\s*\.?[ap]\.?m\.?)\s*[-–—,]?\s*(?<year>20\d{2})\b/i;
 
 /** "by Friday", "this Friday", "next Monday": a weekday with no date after it. */
 const WEEKDAY_ONLY =
@@ -141,6 +145,14 @@ export function findDates(text, { referenceDate } = {}) {
       const notes = [];
       let confidence = 'high';
       const alternatives = [];
+      let yearAfterTime = false;
+      if (year === null && kind.startsWith('named')) {
+        const after = YEAR_AFTER_TIME.exec(text.slice(match.index + match[0].length));
+        if (after) {
+          year = Number(after.groups.year);
+          yearAfterTime = true;
+        }
+      }
 
       if (groups.year && groups.year.length === 2) {
         year = 2000 + year;
@@ -174,6 +186,10 @@ export function findDates(text, { referenceDate } = {}) {
         continue;
       } else {
         value = toISODate(year, month, day);
+        if (yearAfterTime) {
+          confidence = 'medium';
+          notes.push('The year was written after the time. Check it.');
+        }
       }
 
       const weekday = groups.weekday?.toLowerCase();

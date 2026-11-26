@@ -38,7 +38,8 @@ const DATE_LABELS = [
     'submission',
     'submission\\s+(?:deadline|date|closes)|final\\s+submission|submission|submit(?:ted)?(?:\\s+\\w+){0,4}\\s+(?:by|before|on)' +
       '|deadline|due(?:\\s+(?:date|by|on))?(?!\\s+to\\b)|hand(?:ed)?[\\s-]+in|closing\\s+date' +
-      '|upload(?:ed)?(?:\\s+\\w+){0,4}\\s+by',
+      '|upload(?:ed)?(?:\\s+\\w+){0,4}\\s+by|upload\\s+date' +
+      '|completion(?:\\s+(?:and|&)\\s+(?:upload|submission))?\\s+date',
   ],
   [
     'presentation',
@@ -94,6 +95,18 @@ const MODULE_CODE_LABELLED = new RegExp(
   'i',
 );
 const MODULE_CODE_INLINE = /\b(?<value>[A-Z]{2,6}\d{3,5}[A-Z]?)\b/;
+/** Table-layout words that follow "Module" in outlines ("MODULE  PER WEEK"), not names. */
+const MODULE_GENERIC =
+  /^(?:per\s+week|format|code|leader|co-?ordinator|descriptor|overview|outline|details?|information|handbook|aims?|content)$/i;
+/** "CA2", "CA 1", "Continuous Assessment 3". */
+const CA_TOKEN = /\b(?:CA|continuous\s+assessment)\s*\d{1,2}\b/i;
+/** Lines above a CA heading that name the institution or programme, not the module. */
+const NOT_A_MODULE =
+  /\b(?:department|school|faculty|institute|university|college|bsc|ba|msc|meng|beng|programme|lecturer|semester)\b|@|:/i;
+const GROUP_PROJECT =
+  /\bgroup\s+(?:project|work|assignment|report|CA)\b|\bgroup[\s-]+based\b|\bteam\s+project\b/i;
+const DATES_TBC =
+  /\b(?:exact\s+)?dates?\b.{0,20}\b(?:to\s+be\s+(?:confirmed|announced|decided)|tbc|tba|tbd)\b/i;
 
 const PERCENT = '(?<value>\\d{1,3}(?:[.,]\\d+)?)\\s*%';
 const WEIGHT_PATTERNS = [
@@ -112,6 +125,15 @@ const WEIGHT_PATTERNS = [
     ),
   ],
   ['medium', new RegExp(`\\bworth\\s+${PERCENT}`, 'gi')],
+  // "Web Patterns – CA1 – 30%", "CA2 (30%)", "Marks awarded: (30%)"
+  [
+    'medium',
+    new RegExp(
+      `\\b(?:CA|continuous\\s+assessment)\\s*\\d{1,2}\\s*(?:[–—-]|\\()\\s*${PERCENT}`,
+      'gi',
+    ),
+  ],
+  ['medium', new RegExp(`\\bmarks?\\s+awarded\\s*:?\\s*\\(?\\s*${PERCENT}`, 'gi')],
 ];
 
 const NUMBER = '(?:\\d{1,2},\\d{3}|\\d{3,5})';
@@ -164,7 +186,10 @@ const ASSESSMENT_TYPE_LABEL = new RegExp(
 const TYPE_KEYWORDS = [
   ['exam', /\b(?:exam(?:ination)?|class\s+test|in-class\s+test|quiz|mcq)\b/i],
   ['presentation', /\b(?:presentation|pitch|viva|demo(?:nstration)?|poster)\b/i],
-  ['group-project', /\bgroup\s+(?:project|work|assignment|report)\b|\bteam\s+project\b/i],
+  [
+    'group-project',
+    /\bgroup\s+(?:project|work|assignment|report|CA)\b|\bgroup[\s-]+based\b|\bteam\s+project\b/i,
+  ],
   ['lab', /\b(?:lab(?:oratory)?|practical)\b/i],
   [
     'assignment',
@@ -176,7 +201,7 @@ const SECTION_HEADINGS = {
   deliverables:
     /^(?:deliverables?|what\s+(?:to|you\s+(?:must|should|need\s+to))\s+submit|submission\s+(?:requirements|contents|checklist)|you\s+must\s+submit|required\s+submissions?)\b/i,
   markingCriteria:
-    /^(?:marking\s+(?:criteria|scheme|rubric|breakdown|guide)|assessment\s+criteria|grading\s+(?:criteria|rubric)|rubric|mark\s+allocation|marks?\s+breakdown)\b/i,
+    /^(?:marking\s+(?:criteria|scheme|rubric|breakdown|guide)|assessment\s+criteria|grading\s+(?:criteria|rubric)|rubric|mark\s+allocation|marks?\s+breakdown|marks?\s+(?:will\s+be\s+|are\s+)?awarded\s+as\s+follows)\b/i,
   instructions:
     /^(?:instructions?|important(?:\s+(?:information|notes?))?|notes?|guidelines?|submission\s+instructions|academic\s+integrity|plagiarism|general\s+information)\b/i,
 };
@@ -231,13 +256,84 @@ function field(value, line, confidence, extra = {}) {
   return { value, confidence, source: source(line), ...extra };
 }
 
+/** A blank form field such as "Title: ________" or "Name: ....". */
+function isPlaceholder(value) {
+  const letters = value.replace(/[_.…\s\-–—]+/g, '');
+  return letters.length === 0 || (/_{3,}|\.{4,}/.test(value) && letters.length < 3);
+}
+
 function labelled(lines, patterns) {
   for (const line of lines) {
     for (const pattern of patterns) {
       const match = pattern.exec(line.text);
       const value = match?.groups.value.trim().replace(/^[\s.]+|[\s.]+$/g, '');
-      if (value) return { value, line };
+      if (value && !isPlaceholder(value)) return { value, line };
     }
+  }
+  return null;
+}
+
+const SEPARATOR = /\s+[–—-]+\s*|\s*[–—-]+\s+/;
+const DROP_PART =
+  /^(?:released?|issued?|due|deadline|sem(?:ester)?\b|stage\s+\d|year\s+\d)|\b(?:19|20)\d{2}\b/i;
+
+/**
+ * The heading most briefs open with: "Web Patterns – CA1 – 30% – The DAO Pattern",
+ * "Cloud Foundations CA2 - Project Marks awarded: (30%)", or "Web Services" on one line
+ * and "CA2 - Group Based (worth 45%)" on the next. Gives a module name and a title.
+ */
+function headerFields(lines) {
+  const nonEmpty = lines.map((line, index) => ({ line, index })).filter(({ line }) => line.text);
+  for (const [position, { line }] of nonEmpty.slice(0, 15).entries()) {
+    const text = line.text;
+    if (text.includes('\t') || text.length > 140) continue;
+    const token = CA_TOKEN.exec(text);
+    if (!token) continue;
+
+    let module = null;
+    const before = text
+      .slice(0, token.index)
+      .replace(/[\s–—\-:|,]+$/, '')
+      .trim();
+    if (before && /[a-z]{3}/i.test(before) && before.length <= 60 && !NOT_A_MODULE.test(before)) {
+      module = field(before, line, 'medium');
+    } else if (!before && position > 0) {
+      const above = nonEmpty[position - 1].line;
+      const name = above.text
+        .replace(/\s*[–—-]\s*(?:stage|year|semester|sem|level)\s*\d+.*$/i, '')
+        .trim();
+      if (
+        name.length >= 3 &&
+        name.length <= 60 &&
+        /[a-z]{3}/i.test(name) &&
+        !above.text.includes('\t') &&
+        !NOT_A_MODULE.test(name) &&
+        !CA_TOKEN.test(name)
+      ) {
+        module = field(name, above, 'medium');
+      }
+    }
+
+    const parts = text
+      .slice(token.index + token[0].length)
+      .split(SEPARATOR)
+      .map((part) =>
+        part
+          .replace(/\(\s*(?:worth\s*)?\d{1,3}\s*%\s*\)/gi, '')
+          .replace(/\b(?:worth|marks?\s+awarded)\s*:?\s*(?:\d{1,3}\s*%)?/gi, '')
+          .replace(/\b\d{1,3}\s*%/g, '')
+          .replace(/^[\s:()\-–—]+|[\s:(\-–—]+$/g, '')
+          .trim(),
+      )
+      .filter((part) => part && !DROP_PART.test(part));
+    const tokenText = token[0].replace(/\s+/g, ' ');
+    const title =
+      parts.length > 0
+        ? [tokenText, ...parts].join(' – ')
+        : module
+          ? `${module.value} ${tokenText}`
+          : tokenText;
+    return { title: field(clip(title, 200), line, 'medium'), module };
   }
   return null;
 }
@@ -345,9 +441,11 @@ function extractDates(lines, { referenceDate, timeZone }) {
   return { dates: all, invalid };
 }
 
-function moduleFields(lines) {
-  const module = labelled(lines, [MODULE_NAME]);
-  let moduleName = null;
+function moduleFields(lines, header = null) {
+  const labelledModule = labelled(lines, [MODULE_NAME]);
+  const module =
+    labelledModule && !MODULE_GENERIC.test(labelledModule.value) ? labelledModule : null;
+  let moduleName = module ? null : (header?.module ?? null);
   let moduleCode = null;
   if (module) {
     let name = module.value;
@@ -483,16 +581,19 @@ function assessmentType(lines, titleField) {
     const category = categoryFromText(explicit.value);
     if (category) return field(category, explicit.line, 'high', { label: explicit.value });
   }
-  if (titleField) {
-    const category = categoryFromText(titleField.value);
-    if (category)
-      return {
-        value: category,
-        confidence: 'medium',
-        source: titleField.source,
-        label: titleField.value,
-      };
+  const fromTitle = titleField ? categoryFromText(titleField.value) : null;
+  if (!fromTitle || fromTitle === 'assignment') {
+    // "This Group CA covers…", "Group Project -(Design…)" near the top of the brief.
+    const group = lines.slice(0, 30).find((line) => GROUP_PROJECT.test(line.text));
+    if (group) return field('group-project', group, 'medium', { label: clip(group.text, 80) });
   }
+  if (fromTitle)
+    return {
+      value: fromTitle,
+      confidence: 'medium',
+      source: titleField.source,
+      label: titleField.value,
+    };
   return null;
 }
 
@@ -545,8 +646,11 @@ function extractCandidate(lines, allDates, shared, key) {
   const warnings = [];
   const titleMatch = labelled(lines, TITLE_PATTERNS);
   let title = titleMatch ? field(titleMatch.value, titleMatch.line, 'high') : null;
+  if (!title && shared.header?.title) title = shared.header.title;
   if (!title) {
-    const fallback = labelled(lines.slice(0, 40), [TITLE_FALLBACK]);
+    // Table rows ("CA 1 – 15%<tab>CA 1 – 20%") are marking schemes, not titles.
+    const rows = lines.slice(0, 40).filter((line) => !line.text.includes('\t'));
+    const fallback = labelled(rows, [TITLE_FALLBACK]);
     if (fallback) title = field(fallback.value, fallback.line, 'medium');
   }
 
@@ -646,7 +750,13 @@ function splitAssessments(lines, dates) {
         item.lineIndex < segment.end,
     ),
   );
-  return withDeadline.length >= 2 ? segments : null;
+  // The same date repeated in two sections ("Part 5 … Submission Date") is one deadline.
+  const distinctDeadlines = new Set(
+    dates
+      .filter((item) => item.label === 'submission')
+      .map((item) => item.value ?? item.matchedText),
+  );
+  return withDeadline.length >= 2 && distinctDeadlines.size >= 2 ? segments : null;
 }
 
 /**
@@ -664,11 +774,18 @@ export function extractAssessments(
 ) {
   const lines = toLines(content);
   const { dates, invalid } = extractDates(lines, { referenceDate, timeZone });
-  const modules = moduleFields(lines);
+  const header = headerFields(lines);
+  const modules = moduleFields(lines, header);
   const warnings = invalid.map(
     (item) =>
       `“${item.text}” is not a real date and was ignored (${item.source.location ?? 'document'}).`,
   );
+  const tbc = lines.find((line) => DATES_TBC.test(line.text));
+  if (tbc) {
+    warnings.push(
+      `The document says dates are still to be confirmed (${tbc.location ?? 'document'}). Check for an updated brief.`,
+    );
+  }
 
   const segments = splitAssessments(lines, dates);
   let assessments;
@@ -709,7 +826,7 @@ export function extractAssessments(
       extractCandidate(
         lines,
         dates,
-        { ...modules, submissionMethod: null, instructions: [] },
+        { ...modules, header, submissionMethod: null, instructions: [] },
         'assessment-1',
       ),
     ];

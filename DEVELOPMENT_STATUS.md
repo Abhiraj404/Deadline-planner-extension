@@ -48,6 +48,23 @@ changes on top of the Stage 1 commit `da26f40`).
 - Test-only: dialogs did not finish closing in background tabs during the release test;
   the test now brings the tab to the front.
 
+## Extraction rule improvements (after 1.0.0, uncommitted)
+
+Tuned against five real briefs the owner checked locally (not stored in the repository;
+the new tests in `tests/extraction.test.js` → "college brief layouts" use synthetic text).
+Blank `Title: ____` fields ignored; CA headings give title and module
+(`Module – CA1 – 30% – Topic`, module on the line above, `– Stage 2` removed,
+institution lines and table rows skipped); `PER WEEK`-style table words rejected as
+modules; weighting from `CA1 – 30%`, `CA2 (30%)`, `Marks awarded: (30%)`; "Group CA" /
+"Group based" → group project; `Completion and Upload Date` is a submission label;
+`6.pm` times; year written after the time; "dates to be confirmed" warning; a repeated
+deadline no longer splits a brief; "Marks will be awarded as follows" → marking
+criteria. Result on the five briefs: deadline, time, module, title and weighting found
+for all four that contain a deadline; the module outline (dates TBC) gets the warning.
+Lab sheets and lab reports with no date still (correctly) give no deadline.
+
+Next: version bump to 1.0.1 + CHANGELOG entry when the owner wants a release.
+
 ## Verification (2026-11-26, v1.0.0)
 
 - `npm run check`: ESLint and Prettier clean; **16 test files, 218 tests passing**;

@@ -332,3 +332,71 @@ describe('untrusted content', () => {
     expect(performance.now() - started).toBeLessThan(3000);
   });
 });
+
+describe('college brief layouts (synthetic)', () => {
+  it('ignores blank form fields as titles and reads the heading instead', () => {
+    const candidate = first(
+      'Garden Systems\nCA3 - Group Based (worth 25%)\nProject Title: ______________\nCompletion and Upload Date: Thursday 10/12/2026 @ 4.pm',
+    );
+    expect(candidate.title.value).toBe('CA3 – Group Based');
+    expect(candidate.moduleName.value).toBe('Garden Systems');
+    expect(candidate.moduleName.confidence).toBe('medium');
+    expect(candidate.weighting.value).toBe(25);
+    expect(candidate.assessmentType.value).toBe('group-project');
+    expect(candidate.submissionDeadline.value).toBe('2026-12-10');
+    expect(candidate.submissionTime.value).toBe('16:00');
+  });
+
+  it('splits "Module – CA1 – 30% – Topic" headings', () => {
+    const candidate = first(
+      'River Studies – CA1 – 30% - Mapping the Delta\nThis Group CA covers field work.\nDeadline: 23:59 on 6 November 2026.',
+    );
+    expect(candidate.title.value).toBe('CA1 – Mapping the Delta');
+    expect(candidate.moduleName.value).toBe('River Studies');
+    expect(candidate.weighting.value).toBe(30);
+    expect(candidate.assessmentType.value).toBe('group-project');
+    expect(candidate.submissionTime.value).toBe('23:59');
+  });
+
+  it('drops weighting and release parts from the heading', () => {
+    const candidate = first(
+      'Ocean Basics CA2 - Report Marks awarded: (40%) - Released on 2 Oct\nSubmission Date : 11th December 5pm - 2026',
+    );
+    expect(candidate.title.value).toBe('CA2 – Report');
+    expect(candidate.moduleName.value).toBe('Ocean Basics');
+    expect(candidate.weighting.value).toBe(40);
+    expect(candidate.submissionDeadline.value).toBe('2026-12-11');
+    expect(candidate.submissionDeadline.confidence).toBe('medium');
+    expect(candidate.submissionTime.value).toBe('17:00');
+  });
+
+  it('uses the module name above a bare CA heading, without stage suffixes', () => {
+    const candidate = first(
+      'Desert Ecology – Stage 2\nCA4 ( worth 20%) - Sem 1 2026-2027\nTitle:____________\nDue: 4 December 2026',
+    );
+    expect(candidate.title.value).toBe('Desert Ecology CA4');
+    expect(candidate.moduleName.value).toBe('Desert Ecology');
+  });
+
+  it('does not take institution lines or table rows as module or title', () => {
+    const result = extractAssessments(
+      'School of Made-up Studies\nMODULE\tPER WEEK\nCA 1 – 15%\tCA 1 - 20%\nNote: Exact Dates to be Confirmed',
+    );
+    expect(result.assessments[0].title).toBeNull();
+    expect(result.moduleName).toBeNull();
+    expect(result.assessments[0].weighting.confidence).toBe('low');
+    expect(result.warnings.some((w) => w.includes('still to be confirmed'))).toBe(true);
+  });
+
+  it('keeps one assessment when the same deadline is repeated in a later part', () => {
+    const result = extractAssessments(
+      'Part 1 Design\nSubmission date: 10/12/2026\nPart 2 Code\nPart 3 Report\nSubmission date: 10/12/2026',
+    );
+    expect(result.assessments).toHaveLength(1);
+  });
+
+  it('reads "Marks will be awarded as follows" as marking criteria', () => {
+    const candidate = first('Marks will be awarded as follows:\n• Design – 40%\n• Testing – 60%');
+    expect(candidate.markingCriteria).toHaveLength(2);
+  });
+});
