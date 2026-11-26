@@ -87,6 +87,16 @@
   --shadow-md: 0 4px 14px var(--shadow-color), 0 1px 3px var(--shadow-color);
   --shadow-lg: 0 18px 50px light-dark(rgb(20 20 40 / 0.18), rgb(0 0 0 / 0.6));
 
+  /* Module colour labels (always shown next to the module's text). */
+  --module-0: light-dark(#5a4de6, #8d84f5);
+  --module-1: light-dark(#0f7b8a, #4cc3d1);
+  --module-2: light-dark(#b45309, #f0a35a);
+  --module-3: light-dark(#be185d, #f17aab);
+  --module-4: light-dark(#15803d, #5ccf87);
+  --module-5: light-dark(#7c3aed, #b794f6);
+  --module-6: light-dark(#475569, #a3b0c2);
+  --module-7: light-dark(#b91c1c, #f28b8b);
+
   --focus-ring: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-accent);
   --backdrop: light-dark(rgb(20 20 30 / 0.32), rgb(0 0 0 / 0.6));
 }

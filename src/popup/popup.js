@@ -4,11 +4,9 @@
  */
 
 import { createCardList, dueBadge, dueText, emptyState } from '../components/assessment-card.js';
-import {
-  openDeadlineDetails,
-  openDeadlineEditor,
-  toggleComplete,
-} from '../components/deadline-dialogs.js';
+// Dialogs and menus load on first use, so opening the popup only loads the list.
+const dialogs = () => import('../components/deadline-dialogs.js');
+const cardActions = () => import('../components/card-actions.js');
 import { icon } from '../components/icons.js';
 import { showToast } from '../components/toast.js';
 import { getCategories } from '../models/settings.js';
@@ -16,9 +14,12 @@ import { createApp } from '../services/app.js';
 import {
   filterAssessments,
   getDeadlineState,
+  groupByTimeframe,
+  listModules,
   sortAssessments,
   summarize,
 } from '../services/query.js';
+import { moduleColorClass } from '../utils/module-colors.js';
 import { THEME_LABELS, nextTheme } from '../services/theme.js';
 import { todayInTimeZone } from '../utils/dates.js';
 import { debounce, h, isTypingTarget } from '../utils/dom.js';
@@ -41,7 +42,7 @@ async function main() {
     return;
   }
 
-  const view = { tab: 'upcoming', search: '' };
+  const view = { tab: 'upcoming', search: '', module: '' };
 
   // ---------- Header ----------
   const themeButton = h('button', { type: 'button', class: 'icon-button' });
@@ -153,7 +154,7 @@ async function main() {
                 category: quickCategory.value,
               };
               closeQuickAdd();
-              openDeadlineEditor(app, { initial, openAdvanced: true });
+              dialogs().then((m) => m.openDeadlineEditor(app, { initial, openAdvanced: true }));
             },
           },
         },
@@ -242,7 +243,12 @@ async function main() {
         type: 'button',
         class: 'btn',
         title: 'Import a PDF or Word brief',
-        on: { click: () => openDeadlineEditor(app, { tab: 'import' }) },
+        on: {
+          click: () => {
+            app.openImportPage();
+            if (app.isExtension) window.close();
+          },
+        },
       },
       icon('upload', { size: 15 }),
       'Import',
@@ -311,13 +317,21 @@ async function main() {
   const list = h('div', { class: 'card-list', id: 'deadline-list', role: 'tabpanel' });
   const renderList = createCardList(list, { compact: true });
   list.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-action]');
-    const card = event.target.closest('.card');
-    if (!button || !card) return;
-    const assessment = app.getAssessment(card.dataset.id);
-    if (!assessment) return;
-    if (button.dataset.action === 'toggle-complete') toggleComplete(app, assessment);
-    else openDeadlineDetails(app, assessment.id);
+    if (event.target.closest('[data-action]'))
+      cardActions().then((m) => m.handleCardClick(app, event));
+  });
+
+  // Quick module filter: one chip per module with open deadlines.
+  const moduleChips = h('div', {
+    class: 'module-chips',
+    role: 'group',
+    'aria-label': 'Filter by module',
+  });
+  moduleChips.addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-module]');
+    if (!chip) return;
+    view.module = view.module === chip.dataset.module ? '' : chip.dataset.module;
+    render();
   });
 
   const footer = h(
@@ -341,6 +355,7 @@ async function main() {
       actions,
       quickForm,
       h('div', { class: 'list-tools' }, tabList, search),
+      moduleChips,
       list,
     ),
     footer,
@@ -375,7 +390,7 @@ async function main() {
         {
           type: 'button',
           class: 'next-card',
-          on: { click: () => openDeadlineDetails(app, next.id) },
+          on: { click: () => dialogs().then((m) => m.openDeadlineDetails(app, next.id)) },
         },
         h(
           'span',
@@ -417,8 +432,47 @@ async function main() {
     list.setAttribute('aria-labelledby', `tab-${view.tab}`);
 
     const status = view.tab === 'completed' ? 'completed' : 'open';
-    const filtered = filterAssessments(assessments, { status, search: view.search }, context);
-    const sorted = sortAssessments(filtered, 'deadline', { descending: status === 'completed' });
+    const modules = listModules(assessments).filter((module) => module.open > 0);
+    if (view.module && !modules.some((module) => module.key === view.module)) view.module = '';
+    moduleChips.hidden = modules.length < 2;
+    moduleChips.replaceChildren(
+      ...modules.map((module) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'module-chip',
+            dataset: { module: module.key },
+            'aria-pressed': String(view.module === module.key),
+            title: module.label,
+          },
+          h('span', { class: ['module-dot', moduleColorClass(module.key)], 'aria-hidden': 'true' }),
+          module.key,
+        ),
+      ),
+    );
+
+    const filtered = filterAssessments(
+      assessments,
+      { status, search: view.search, module: view.module || null },
+      context,
+    );
+    const sorted = sortAssessments(filtered, 'deadline', {
+      descending: status === 'completed',
+      pinnedFirst: status !== 'completed',
+    });
+    // Upcoming: pinned first, then Overdue / Today / Tomorrow / This week / Next week / Later.
+    const pinned = sorted.filter((item) => item.pinned && status !== 'completed');
+    const groups =
+      status === 'completed'
+        ? null
+        : [
+            ...(pinned.length ? [{ key: 'pinned', label: 'Pinned', items: pinned }] : []),
+            ...groupByTimeframe(
+              sorted.filter((item) => !item.pinned),
+              { ...context, weekStartsOn: settings.weekStartsOn },
+            ),
+          ];
 
     let empty;
     if (view.search)
@@ -440,7 +494,7 @@ async function main() {
         ),
       });
     }
-    renderList(sorted, { now, settings, empty });
+    renderList(sorted, { now, settings, empty, groups: sorted.length ? groups : null });
   }
 
   app.onChange(() => {
@@ -458,6 +512,13 @@ async function main() {
     } else if (event.key === 'n' || event.key === 'N') {
       event.preventDefault();
       openQuickAdd();
+    } else if (event.key === 'i' || event.key === 'I') {
+      event.preventDefault();
+      app.openImportPage();
+      if (app.isExtension) window.close();
+    } else if (event.key === 'd' || event.key === 'D') {
+      event.preventDefault();
+      openDashboard();
     }
   });
 }

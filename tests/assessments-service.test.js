@@ -177,12 +177,7 @@ describe('editing, completing and deleting', () => {
 });
 
 describe('documents on manual deadlines', () => {
-  it('attaches and detaches a document reference', async () => {
-    const { assessment } = await service.create({
-      title: 'Essay',
-      dueDate: '2026-12-11',
-      notes: 'Mine',
-    });
+  it('detaches a document reference', async () => {
     const doc = {
       id: 'doc-1',
       name: 'brief.pdf',
@@ -190,12 +185,16 @@ describe('documents on manual deadlines', () => {
       size: 1200,
       attachedAt: clock.toISOString(),
     };
-    const attached = await service.attachDocument(assessment.id, doc);
-    expect(attached.assessment.sourceDocument).toEqual(doc);
-    expect(attached.assessment.sourceType).toBe('manual'); // still a manual deadline
-    expect(attached.assessment.notes).toBe('Mine');
+    const { assessment } = await service.create({
+      title: 'Essay',
+      dueDate: '2026-12-11',
+      notes: 'Mine',
+      sourceDocument: doc,
+    });
+    expect(assessment.sourceDocument).toEqual(doc);
     const detached = await service.detachDocument(assessment.id);
     expect(detached.assessment.sourceDocument).toBeNull();
+    expect(detached.assessment.notes).toBe('Mine');
   });
 
   it('creates a deadline manually with a linked document when extraction is unavailable', async () => {

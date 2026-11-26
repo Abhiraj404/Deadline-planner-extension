@@ -4,10 +4,12 @@
  * "Advanced options" so a basic deadline takes two fields.
  */
 
+import { RELATED_DATE_LABELS } from '../models/assessment.js';
 import { getCategories } from '../models/settings.js';
-import { REMINDER_PRESETS, describeOffset } from '../services/reminders.js';
+import { describeOffset } from '../services/reminders.js';
+import { createOffsetPicker } from './offset-picker.js';
 import { listTimeZones } from '../utils/dates.js';
-import { formatBytes, h, uniqueId } from '../utils/dom.js';
+import { h, uniqueId } from '../utils/dom.js';
 import { icon } from './icons.js';
 
 const NEW_CATEGORY = '__new__';
@@ -129,38 +131,31 @@ function checklistEditor(initialItems) {
 }
 
 /** Reminder choice: the defaults, or a custom set of offsets. */
+/** Reminders for one deadline: the defaults, none at all, or a custom set. */
 function reminderEditor(initialOffsets, defaultOffsets) {
   const name = uniqueId('reminder-mode');
-  const useDefaults = initialOffsets === null;
+  const mode =
+    initialOffsets === null ? 'default' : initialOffsets.length === 0 ? 'none' : 'custom';
   const defaultsText = defaultOffsets.length
     ? defaultOffsets.map(describeOffset).join(', ')
     : 'none';
-  const defaultRadio = h('input', { type: 'radio', name, value: 'default', checked: useDefaults });
-  const customRadio = h('input', { type: 'radio', name, value: 'custom', checked: !useDefaults });
-  const selected = new Set(initialOffsets ?? defaultOffsets);
-  const boxes = REMINDER_PRESETS.map((preset) =>
-    h(
-      'label',
-      { class: 'check-pill' },
-      h('input', {
-        type: 'checkbox',
-        value: String(preset.minutes),
-        checked: selected.has(preset.minutes),
-      }),
-      h('span', null, preset.label),
-    ),
+  const radio = (value) => h('input', { type: 'radio', name, value, checked: mode === value });
+  const defaultRadio = radio('default');
+  const noneRadio = radio('none');
+  const customRadio = radio('custom');
+  const picker = createOffsetPicker(mode === 'custom' ? initialOffsets : defaultOffsets, null, {
+    label: 'Reminders for this deadline',
+  });
+  const customGroup = h(
+    'div',
+    { class: 'reminder-custom', hidden: mode !== 'custom' },
+    picker.element,
   );
-  // Custom offsets that are not presets (from imports or backups) are kept as-is.
-  const extraOffsets = [...selected].filter(
-    (minutes) => !REMINDER_PRESETS.some((preset) => preset.minutes === minutes),
-  );
-  const customGroup = h('div', { class: 'check-pills', hidden: useDefaults }, boxes);
-
   const sync = () => {
     customGroup.hidden = !customRadio.checked;
   };
-  defaultRadio.addEventListener('change', sync);
-  customRadio.addEventListener('change', sync);
+  for (const input of [defaultRadio, noneRadio, customRadio])
+    input.addEventListener('change', sync);
 
   const element = h(
     'fieldset',
@@ -174,18 +169,106 @@ function reminderEditor(initialOffsets, defaultOffsets) {
     ),
     h('label', { class: 'radio-row' }, customRadio, h('span', null, 'Choose for this deadline')),
     customGroup,
+    h(
+      'label',
+      { class: 'radio-row' },
+      noneRadio,
+      h('span', null, 'No reminders for this deadline'),
+    ),
   );
 
   return {
     element,
-    getOffsets: () => {
-      if (defaultRadio.checked) return null;
-      const chosen = boxes
-        .map((label) => label.querySelector('input'))
-        .filter((box) => box.checked)
-        .map((box) => Number(box.value));
-      return [...chosen, ...extraOffsets];
+    getOffsets: () => (defaultRadio.checked ? null : noneRadio.checked ? [] : picker.getOffsets()),
+  };
+}
+
+/** Editable list of related dates (presentation slot, exam, feedback…). */
+function relatedDatesEditor(initial) {
+  let items = initial.map((item) => ({ ...item }));
+  const list = h('ul', { class: 'related-editor' });
+  const labelOptions = Object.entries(RELATED_DATE_LABELS);
+
+  function render() {
+    list.replaceChildren(
+      ...items.map((item, index) => {
+        const label = h(
+          'select',
+          { class: 'input select', 'aria-label': 'Kind of date' },
+          labelOptions.map(([value, text]) =>
+            h('option', { value, selected: value === item.label }, text),
+          ),
+        );
+        const date = h('input', {
+          class: 'input',
+          type: 'date',
+          value: item.date ?? '',
+          'aria-label': 'Date',
+        });
+        const time = h('input', {
+          class: 'input',
+          type: 'time',
+          value: item.time ?? '',
+          'aria-label': 'Time (optional)',
+        });
+        const note = h('input', {
+          class: 'input',
+          type: 'text',
+          value: item.note ?? '',
+          maxlength: 200,
+          placeholder: 'Note',
+          'aria-label': 'Note (optional)',
+        });
+        label.addEventListener('change', () => (item.label = label.value));
+        date.addEventListener('change', () => (item.date = date.value));
+        time.addEventListener('change', () => (item.time = time.value || null));
+        note.addEventListener('input', () => (item.note = note.value));
+        return h(
+          'li',
+          { class: 'related-editor-row' },
+          label,
+          date,
+          time,
+          note,
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'icon-button icon-button-sm',
+              'aria-label': 'Remove this date',
+              on: {
+                click: () => {
+                  items.splice(index, 1);
+                  render();
+                },
+              },
+            },
+            icon('x', { size: 14 }),
+          ),
+        );
+      }),
+    );
+  }
+  render();
+  const addButton = h(
+    'button',
+    {
+      type: 'button',
+      class: 'btn btn-sm',
+      on: {
+        click: () => {
+          items = [...items, { label: 'presentation', date: '', time: null, note: '' }];
+          render();
+          list.querySelector('li:last-child input[type=date]')?.focus();
+        },
+      },
     },
+    icon('plus', { size: 13 }),
+    'Add a date',
+  );
+  return {
+    element: h('div', { class: 'checklist-field' }, list, h('div', null, addButton)),
+    getItems: () => items.filter((item) => item.date || item.note),
   };
 }
 
@@ -197,7 +280,6 @@ function reminderEditor(initialOffsets, defaultOffsets) {
  * @param {(label: string) => Promise<{id: string, label: string} | null>} options.onAddCategory
  * @param {(value: object) => Promise<{ok: boolean, errors?: object}>} options.onSubmit
  * @param {() => void} options.onCancel
- * @param {object|null} [options.document] a document reference to show as attached
  */
 export function createDeadlineForm({
   mode,
@@ -206,7 +288,6 @@ export function createDeadlineForm({
   onAddCategory,
   onSubmit,
   onCancel,
-  document: attachedDocument = null,
   openAdvanced = false,
 }) {
   const categories = getCategories(settings);
@@ -359,6 +440,25 @@ export function createDeadlineForm({
     maxlength: 2048,
   });
   const tags = textInput('tags', values.tags.join(', '), { placeholder: 'Comma separated' });
+  const submissionMethod = textInput('submissionMethod', values.submissionMethod, {
+    maxlength: 200,
+    placeholder: 'e.g. Moodle, Turnitin, in person',
+  });
+  const wordCount = textInput('wordCount', values.wordCount, {
+    maxlength: 80,
+    placeholder: 'e.g. 2,000 words',
+  });
+  const groupSize = textInput('groupSize', values.groupSize, {
+    maxlength: 80,
+    placeholder: 'e.g. 3–4 students',
+  });
+  const instructions = textarea('instructions', (values.instructions ?? []).join('\n'), {
+    placeholder: 'One instruction per line',
+  });
+  const markingCriteria = textarea('markingCriteria', (values.markingCriteria ?? []).join('\n'), {
+    placeholder: 'One criterion per line',
+  });
+  const relatedDates = relatedDatesEditor(values.relatedDates ?? []);
   const timeZone = select(
     'timeZone',
     listTimeZones().map((zone) => ({ value: zone, label: zone.replaceAll('_', ' ') })),
@@ -384,7 +484,13 @@ export function createDeadlineForm({
     values.checklist.length ||
     values.tags.length ||
     values.reminderOffsets ||
-    values.estimatedMinutes,
+    values.estimatedMinutes ||
+    values.submissionMethod ||
+    values.wordCount ||
+    values.groupSize ||
+    values.instructions?.length ||
+    values.markingCriteria?.length ||
+    values.relatedDates?.length,
   );
 
   const advanced = h(
@@ -439,6 +545,42 @@ export function createDeadlineForm({
         ),
         checklist.element,
       ),
+      field({
+        label: 'Submission method',
+        name: 'submissionMethod',
+        input: submissionMethod,
+        optional: true,
+      }),
+      h(
+        'div',
+        { class: 'field-row' },
+        field({ label: 'Word count', name: 'wordCount', input: wordCount, optional: true }),
+        field({ label: 'Group size', name: 'groupSize', input: groupSize, optional: true }),
+      ),
+      field({
+        label: 'Important instructions',
+        name: 'instructions',
+        input: instructions,
+        optional: true,
+      }),
+      field({
+        label: 'Marking criteria',
+        name: 'markingCriteria',
+        input: markingCriteria,
+        optional: true,
+      }),
+      h(
+        'div',
+        { class: 'field', dataset: { field: 'relatedDates' } },
+        h(
+          'span',
+          { class: 'field-label' },
+          'Other dates',
+          h('span', { class: 'field-optional' }, 'optional'),
+        ),
+        relatedDates.element,
+        h('p', { class: 'field-error', hidden: true }),
+      ),
       field({ label: 'Notes', name: 'notes', input: notes, optional: true }),
       field({
         label: 'Submission link',
@@ -472,18 +614,6 @@ export function createDeadlineForm({
     'form',
     { class: 'deadline-form', novalidate: true },
     formError,
-    attachedDocument
-      ? h(
-          'div',
-          { class: 'attached-doc' },
-          icon('file', { size: 14 }),
-          h(
-            'span',
-            null,
-            `${attachedDocument.name} (${formatBytes(attachedDocument.size)}) will be linked`,
-          ),
-        )
-      : null,
     field({ label: 'Title', name: 'title', input: title }),
     h(
       'div',
@@ -552,6 +682,12 @@ export function createDeadlineForm({
       'tags',
       'timeZone',
       'reminderOffsets',
+      'submissionMethod',
+      'wordCount',
+      'groupSize',
+      'instructions',
+      'markingCriteria',
+      'relatedDates',
     ];
     if (advancedFields.some((name) => errors[name])) advanced.open = true;
     formError.hidden = !errors.form;
@@ -579,6 +715,12 @@ export function createDeadlineForm({
       timeZone: timeZone.value,
       checklist: checklist.getItems(),
       reminderOffsets: reminders.getOffsets(),
+      submissionMethod: submissionMethod.value,
+      wordCount: wordCount.value,
+      groupSize: groupSize.value,
+      instructions: instructions.value,
+      markingCriteria: markingCriteria.value,
+      relatedDates: relatedDates.getItems(),
       ...(mode === 'edit' ? { completed: completed.checked } : {}),
     };
   }

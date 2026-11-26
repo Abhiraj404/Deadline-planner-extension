@@ -10,9 +10,10 @@
  */
 
 import { normalizeAssessment } from '../models/assessment.js';
+import { normalizeDocumentRecord } from '../models/document.js';
 import { normalizeSettings } from '../models/settings.js';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 /**
  * Version 0 is the shape sketched in the original Deadline Planner extension plan:
@@ -43,6 +44,21 @@ const MIGRATIONS = {
       assessments: items.map(fromLegacyItem),
       settings: normalizeSettings(snapshot.settings),
     };
+  },
+  /**
+   * Version 2 (Stage 2) adds the document library (`documents`) and new assessment
+   * fields (submissionMethod, wordCount, groupSize, instructions, markingCriteria,
+   * relatedDates). Existing deadlines get empty values; nothing is invented.
+   */
+  2(snapshot) {
+    return { ...snapshot, documents: Array.isArray(snapshot.documents) ? snapshot.documents : [] };
+  },
+  /**
+   * Version 3 (Stage 3) adds `pinned` and `isDemo` to deadlines (both false for existing
+   * records, filled in by normalisation) and the separate `reminderState` key.
+   */
+  3(snapshot) {
+    return snapshot;
   },
 };
 
@@ -82,11 +98,21 @@ export function migrateSnapshot(snapshot) {
     assessments.push(item);
   }
 
+  const documentIds = new Set();
+  const documents = [];
+  for (const raw of Array.isArray(current.documents) ? current.documents : []) {
+    const record = normalizeDocumentRecord(raw);
+    if (!record || documentIds.has(record.id)) continue;
+    documentIds.add(record.id);
+    documents.push(record);
+  }
+
   return {
     snapshot: {
       schemaVersion: CURRENT_SCHEMA_VERSION,
       assessments,
       settings: normalizeSettings(current.settings),
+      documents,
     },
     changed: startVersion !== CURRENT_SCHEMA_VERSION,
     readOnly: false,

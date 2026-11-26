@@ -36,7 +36,25 @@ export const USER_FIELDS = Object.freeze([
   'reminderOffsets',
   'estimatedMinutes',
   'tags',
+  'submissionMethod',
+  'wordCount',
+  'groupSize',
+  'instructions',
+  'markingCriteria',
+  'relatedDates',
+  'pinned',
 ]);
+
+/** Kinds of related (non-deadline) dates, e.g. a presentation slot after submission. */
+export const RELATED_DATE_LABELS = Object.freeze({
+  presentation: 'Presentation',
+  exam: 'Examination',
+  release: 'Released',
+  feedback: 'Feedback',
+  revision: 'Revision',
+  late_submission: 'Late submission',
+  other: 'Other',
+});
 
 export function createId() {
   return globalThis.crypto.randomUUID();
@@ -82,6 +100,33 @@ export function normalizeTags(value) {
     tags.push(tag);
   }
   return tags.slice(0, 20);
+}
+
+/** A list of short strings (instructions, marking criteria). Accepts text with one item per line. */
+export function normalizeTextList(value, { maxItems = 30, maxLength = 300 } = {}) {
+  const list = typeof value === 'string' ? value.split(/\r?\n/) : Array.isArray(value) ? value : [];
+  const items = [];
+  for (const raw of list) {
+    const text = nullableString(typeof raw === 'string' ? raw : raw?.text, maxLength);
+    if (text && !items.includes(text)) items.push(text);
+  }
+  return items.slice(0, maxItems);
+}
+
+export function normalizeRelatedDates(value, idFactory = createId) {
+  if (!Array.isArray(value)) return [];
+  const items = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || !isValidISODate(item.date)) continue;
+    items.push({
+      id: typeof item.id === 'string' && item.id ? item.id : idFactory(),
+      label: Object.hasOwn(RELATED_DATE_LABELS, item.label) ? item.label : 'other',
+      date: item.date,
+      time: isValidTime(item.time) ? item.time : null,
+      note: nullableString(item.note, 200),
+    });
+  }
+  return items.slice(0, 20);
 }
 
 function normalizeDocument(value) {
@@ -131,6 +176,15 @@ export function normalizeAssessment(raw, { idFactory = createId } = {}) {
       : null,
     estimatedMinutes: nullableNumber(raw.estimatedMinutes, { min: 1, max: 60_000, integer: true }),
     tags: normalizeTags(raw.tags),
+    submissionMethod: nullableString(raw.submissionMethod, 200),
+    wordCount: nullableString(raw.wordCount, 80),
+    groupSize: nullableString(raw.groupSize, 80),
+    instructions: normalizeTextList(raw.instructions),
+    markingCriteria: normalizeTextList(raw.markingCriteria),
+    relatedDates: normalizeRelatedDates(raw.relatedDates, idFactory),
+    pinned: raw.pinned === true,
+    // Demo records (Settings → Demo data) can be removed without touching real ones.
+    isDemo: raw.isDemo === true,
     completed,
     completedAt: completed && typeof raw.completedAt === 'string' ? raw.completedAt : null,
     sourceType,
@@ -151,7 +205,7 @@ export function normalizeAssessment(raw, { idFactory = createId } = {}) {
 function suppliedFields(input) {
   return USER_FIELDS.filter((field) => {
     const value = input[field];
-    if (value === null || value === undefined || value === '') return false;
+    if (value === null || value === undefined || value === '' || value === false) return false;
     if (Array.isArray(value)) return value.length > 0;
     return true;
   });
@@ -182,7 +236,8 @@ export function createAssessment(
   );
   if (!base) throw new TypeError('createAssessment needs a title and a valid due date');
   base.userConfirmed = sourceType === 'manual' ? true : input.userConfirmed === true;
-  base.confirmedFields = sourceType === 'manual' ? suppliedFields(base) : [];
+  // Values the user saw and accepted in the import review count as confirmed too.
+  base.confirmedFields = base.userConfirmed ? suppliedFields(base) : [];
   return base;
 }
 

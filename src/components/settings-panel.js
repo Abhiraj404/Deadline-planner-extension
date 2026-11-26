@@ -3,9 +3,17 @@
  * no separate Save button to forget.
  */
 
-import { BUILT_IN_CATEGORIES, getCategories } from '../models/settings.js';
-import { backupFileName, createBackup, mergeAssessments, parseBackup } from '../services/backup.js';
-import { REMINDER_PRESETS } from '../services/reminders.js';
+import { BUILT_IN_CATEGORIES, IMPORT_LIMIT_RANGES, getCategories } from '../models/settings.js';
+import { fileStore } from '../services/file-store.js';
+import { BADGE_MODES, SNOOZE_OPTIONS } from '../services/reminders.js';
+import {
+  demoControls,
+  exportBackup,
+  resetEverything,
+  restoreBackup,
+  storageUsageLine,
+} from './data-tools.js';
+import { createOffsetPicker } from './offset-picker.js';
 import { listTimeZones } from '../utils/dates.js';
 import { h, uniqueId } from '../utils/dom.js';
 import { addCategory } from './deadline-dialogs.js';
@@ -49,53 +57,6 @@ function selectControl(options, value, onChange) {
   );
   element.addEventListener('change', () => onChange(element.value));
   return element;
-}
-
-function downloadJson(data, fileName) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = h('a', { href: url, download: fileName });
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function chooseRestoreMode(count) {
-  return new Promise((resolve) => {
-    let mode = null;
-    const choose = (value) => {
-      mode = value;
-      handle.close();
-    };
-    const handle = openDialog({
-      title: 'Restore backup',
-      size: 'sm',
-      body: h(
-        'p',
-        { class: 'confirm-message' },
-        `The backup contains ${count} deadline${count === 1 ? '' : 's'}. Merge keeps your current deadlines and adds or updates from the backup. Replace removes everything first.`,
-      ),
-      footer: [
-        h(
-          'button',
-          { type: 'button', class: 'btn', on: { click: () => handle.close() } },
-          'Cancel',
-        ),
-        h(
-          'button',
-          { type: 'button', class: 'btn btn-ghost-danger', on: { click: () => choose('replace') } },
-          'Replace all',
-        ),
-        h(
-          'button',
-          { type: 'button', class: 'btn btn-primary', on: { click: () => choose('merge') } },
-          'Merge',
-        ),
-      ],
-      onClose: () => resolve(mode),
-    });
-  });
 }
 
 export function openSettings(app) {
@@ -197,24 +158,43 @@ export function openSettings(app) {
     notifications.addEventListener('change', () =>
       save({ notificationsEnabled: notifications.checked }),
     );
-    const offsets = new Set(settings.defaultReminderOffsets);
-    const reminderPills = h(
-      'div',
-      { class: 'check-pills check-pills-flush', role: 'group', 'aria-label': 'Default reminders' },
-      REMINDER_PRESETS.map((preset) => {
-        const box = h('input', {
-          type: 'checkbox',
-          checked: offsets.has(preset.minutes),
-          dataset: { setting: `reminder-${preset.minutes}` },
-        });
-        box.addEventListener('change', () => {
-          if (box.checked) offsets.add(preset.minutes);
-          else offsets.delete(preset.minutes);
-          save({ defaultReminderOffsets: [...offsets] });
-        });
-        return h('label', { class: 'check-pill' }, box, h('span', null, preset.label));
-      }),
+    const reminderPicker = createOffsetPicker(
+      settings.defaultReminderOffsets,
+      (offsets) => save({ defaultReminderOffsets: offsets }),
+      { label: 'Default reminders' },
     );
+    const badgeMode = selectControl(
+      Object.entries(BADGE_MODES).map(([value, label]) => ({ value, label })),
+      settings.badgeMode,
+      (value) => save({ badgeMode: value }),
+    );
+    badgeMode.dataset.setting = 'badgeMode';
+    const snoozeLength = selectControl(
+      SNOOZE_OPTIONS.map((option) => ({ value: String(option.minutes), label: option.label })),
+      String(settings.snoozeMinutes),
+      (value) => save({ snoozeMinutes: Number(value) }),
+    );
+    snoozeLength.dataset.setting = 'snoozeMinutes';
+    const history = app.getState().reminderState?.history ?? [];
+    const historyList = history.length
+      ? h(
+          'ul',
+          { class: 'plain-list history-list' },
+          history
+            .slice(0, 8)
+            .map((entry) =>
+              h(
+                'li',
+                null,
+                `${new Date(entry.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} · `,
+                entry.kind === 'missed-summary'
+                  ? `${entry.count} missed reminders summarised`
+                  : `${entry.kind === 'snooze' ? 'Snoozed reminder' : entry.kind === 'missed' ? 'Missed reminder' : 'Reminder'}: ${entry.title ?? (entry.titles ?? []).join(', ')}`,
+              ),
+            ),
+        )
+      : h('p', { class: 'muted' }, 'No reminders have been shown yet.');
+
     const reminderTime = h('input', {
       class: 'input input-time',
       type: 'time',
@@ -301,21 +281,61 @@ export function openSettings(app) {
     restoreInput.addEventListener('change', async () => {
       const file = restoreInput.files?.[0];
       restoreInput.value = '';
-      if (!file) return;
-      const parsed = parseBackup(await file.text());
-      if (!parsed.ok) return showToast(parsed.error, { tone: 'danger' });
-      const mode = await chooseRestoreMode(parsed.assessments.length);
-      if (!mode) return;
-      const { assessments } = app.getState();
-      await app.storage.replaceAll({
-        assessments: mergeAssessments(assessments, parsed.assessments, mode),
-        settings: mode === 'replace' ? parsed.settings : app.getSettings(),
-      });
-      const skipped = parsed.skipped ? ` (${parsed.skipped} invalid skipped)` : '';
-      showToast(`Restored ${parsed.assessments.length} deadlines${skipped}`, { tone: 'success' });
+      if (file) await restoreBackup(app, file);
     });
 
     const version = globalThis.chrome?.runtime?.getManifest?.().version ?? 'preview';
+
+    const retain = h('input', {
+      type: 'checkbox',
+      checked: settings.retainDocumentFiles,
+      dataset: { setting: 'retain' },
+    });
+    retain.addEventListener('change', async () => {
+      if (!retain.checked && (app.getState().documents ?? []).some((record) => record.fileStored)) {
+        const confirmed = await confirmDialog({
+          title: 'Stop keeping original files?',
+          message:
+            'Stored copies of imported files will be deleted. The details and evidence stay in the library.',
+          confirmLabel: 'Delete stored files',
+          danger: true,
+        });
+        if (!confirmed) {
+          retain.checked = true;
+          return;
+        }
+        await fileStore.clear().catch(() => {});
+        await app.storage.updateDocuments((records) =>
+          records.map((record) => (record.fileStored ? { ...record, fileStored: false } : record)),
+        );
+      }
+      save({ retainDocumentFiles: retain.checked });
+    });
+    const limitLabels = {
+      maxFileSizeMB: 'Largest file (MB)',
+      maxPdfPages: 'Most PDF pages read',
+      maxTextChars: 'Most characters of text read',
+      maxDocxExpandedMB: 'Largest unpacked Word file (MB)',
+      maxBatchSize: 'Files per import batch',
+    };
+    const limitInputs = Object.entries(IMPORT_LIMIT_RANGES).map(([key, [min, max]]) => {
+      const input = h('input', {
+        class: 'input',
+        type: 'number',
+        min,
+        max,
+        step: 1,
+        value: settings.importLimits[key],
+        dataset: { setting: `limit-${key}` },
+      });
+      input.addEventListener('change', () => {
+        const value = Number(input.value);
+        if (Number.isInteger(value) && value >= min && value <= max) {
+          save({ importLimits: { ...app.getSettings().importLimits, [key]: value } });
+        } else input.value = settings.importLimits[key];
+      });
+      return labelled(limitLabels[key], input, `${min.toLocaleString()}–${max.toLocaleString()}`);
+    });
 
     handle.body.replaceChildren(
       h(
@@ -341,7 +361,7 @@ export function openSettings(app) {
         ),
         section(
           'Reminders',
-          'Browser notifications before each deadline. They work while the browser is running.',
+          'Browser notifications before each deadline, scheduled with the browser’s alarm system.',
           h(
             'label',
             { class: 'checkbox-row' },
@@ -352,13 +372,34 @@ export function openSettings(app) {
             'div',
             { class: 'field' },
             h('span', { class: 'field-label' }, 'Default reminders'),
-            reminderPills,
+            reminderPicker.element,
+            h(
+              'p',
+              { class: 'field-hint' },
+              '“1 hour before” and other reminders under a day only apply to deadlines with a submission time. Each deadline can override these in its Advanced options.',
+            ),
           ),
-          labelled(
-            'Time of day for date-only deadlines',
-            reminderTime,
-            'For example, “1 day before” a Friday deadline fires on Thursday at this time.',
+          h(
+            'div',
+            { class: 'settings-grid' },
+            labelled(
+              'Reminder time for date-only deadlines',
+              reminderTime,
+              'Used because a date-only deadline has no official time. “1 day before” a Friday deadline fires on Thursday at this time.',
+            ),
+            labelled('Snooze length (notification button)', snoozeLength),
+            labelled(
+              'Toolbar badge shows',
+              badgeMode,
+              'The tooltip always lists overdue, due-soon and upcoming counts.',
+            ),
           ),
+          h(
+            'p',
+            { class: 'notice notice-warning' },
+            'Reminders are a convenience, not a guarantee. The browser may deliver them a few minutes late, and nothing can be shown while the browser or computer is off; reminders missed in that time are summarised when the browser starts again. Always check official deadlines with your college.',
+          ),
+          h('details', null, h('summary', { class: 'link' }, 'Recent reminders'), historyList),
         ),
         section(
           'Categories',
@@ -367,23 +408,25 @@ export function openSettings(app) {
           h('div', { class: 'inline-row' }, newCategory, addCategoryButton),
         ),
         section(
-          'Backup and data',
-          'Everything is stored only in this browser profile. Export a backup to move or keep your data safe.',
+          'Document import',
+          'Briefs are read on this device. These limits protect against very large or malformed files.',
+          h(
+            'label',
+            { class: 'checkbox-row' },
+            retain,
+            h('span', null, 'Keep original files (stored in this browser only)'),
+          ),
+          h('div', { class: 'settings-grid' }, limitInputs),
+        ),
+        section(
+          'Backup and restore',
+          'Everything is stored only in this browser profile. A backup is a JSON file with your deadlines, modules, notes, completion, reminder settings and document details (never the documents themselves).',
           h(
             'div',
             { class: 'inline-row wrap' },
             h(
               'button',
-              {
-                type: 'button',
-                class: 'btn',
-                on: {
-                  click: () => {
-                    downloadJson(createBackup(app.getState()), backupFileName());
-                    showToast('Backup downloaded');
-                  },
-                },
-              },
+              { type: 'button', class: 'btn', on: { click: () => exportBackup(app) } },
               icon('download', { size: 14 }),
               'Export backup',
             ),
@@ -391,32 +434,32 @@ export function openSettings(app) {
               'button',
               { type: 'button', class: 'btn', on: { click: () => restoreInput.click() } },
               icon('upload', { size: 14 }),
-              'Restore backup',
+              'Restore backup…',
             ),
             restoreInput,
+          ),
+          storageUsageLine(h('p', { class: 'field-hint' }, 'Checking storage use…')),
+        ),
+        section(
+          'Demo data',
+          'Invented deadlines for trying the extension. They are marked as demo and can be removed without touching your own.',
+          demoControls(app),
+        ),
+        section(
+          'Reset',
+          'Delete everything this extension stores in this browser.',
+          h(
+            'div',
+            null,
             h(
               'button',
               {
                 type: 'button',
                 class: 'btn btn-ghost-danger',
-                on: {
-                  click: async () => {
-                    const count = app.getState().assessments.length;
-                    const confirmed = await confirmDialog({
-                      title: 'Delete all deadlines?',
-                      message: `This permanently removes all ${count} deadlines from this browser. Export a backup first if you might need them. Settings are kept.`,
-                      confirmLabel: 'Delete all',
-                      danger: true,
-                    });
-                    if (confirmed) {
-                      await app.storage.saveAssessments([]);
-                      showToast('All deadlines deleted');
-                    }
-                  },
-                },
+                on: { click: () => resetEverything(app) },
               },
               icon('trash', { size: 14 }),
-              'Delete all deadlines',
+              'Reset everything…',
             ),
           ),
         ),

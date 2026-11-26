@@ -44,14 +44,21 @@ describe('manifest', () => {
 });
 
 describe('dependencies', () => {
-  it('ships with no production dependencies', () => {
+  it('ships only the two document libraries as production dependencies', () => {
     const pkg = JSON.parse(read('package.json'));
-    expect(pkg.dependencies ?? {}).toEqual({});
+    expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(['mammoth', 'pdfjs-dist']);
   });
 
-  it('manual deadlines never load document parsers (PDF.js, Mammoth)', () => {
+  it('imports PDF.js and Mammoth only from the lazy loaders and the DOCX worker', () => {
+    // Everything else (popup, dashboard, manual forms) must never pull them in.
+    const allowed = ['src/documents/loaders.js', 'src/documents/docx-worker.js'];
     for (const file of jsFiles) {
-      expect(read(file), file).not.toMatch(/pdfjs|pdf\.js|mammoth/i);
+      const code = read(file);
+      const imports = [...code.matchAll(/(?:from\s+|import\()\s*['"]([^'"]+)['"]/g)].map(
+        (m) => m[1],
+      );
+      const usesParser = imports.some((name) => /^(pdfjs-dist|mammoth)/.test(name));
+      expect(usesParser && !allowed.includes(file.replaceAll('\\', '/')), file).toBe(false);
     }
   });
 });

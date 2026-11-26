@@ -194,12 +194,3 @@ export function monthGrid(year, month, weekStartsOn = 1) {
   const start = addDays(first, -((weekday - weekStartsOn + 7) % 7));
   return Array.from({ length: 42 }, (_, index) => addDays(start, index));
 }
-
-/** Human label for a day difference: "Today", "Tomorrow", "In 5 days", "2 days ago". */
-export function relativeDayLabel(days) {
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Tomorrow';
-  if (days === -1) return 'Yesterday';
-  if (days > 1) return `In ${days} days`;
-  return `${-days} days ago`;
-}

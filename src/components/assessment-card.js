@@ -11,6 +11,7 @@ import { getDeadlineState } from '../services/query.js';
 import { formatDate, formatTime } from '../utils/dates.js';
 import { h } from '../utils/dom.js';
 import { icon } from './icons.js';
+import { moduleColorClass } from '../utils/module-colors.js';
 
 const PRIORITY_TEXT = { high: 'High priority', medium: 'Medium priority', low: 'Low priority' };
 const TONE_ICON = {
@@ -59,6 +60,14 @@ export function renderAssessmentCard(assessment, { now, settings, compact = fals
   const doneCount = assessment.checklist.filter((item) => item.done).length;
 
   const chips = [
+    assessment.pinned
+      ? h(
+          'span',
+          { class: 'chip chip-pinned', title: 'Pinned' },
+          icon('pin', { size: 12 }),
+          h('span', { class: 'sr-only' }, 'Pinned'),
+        )
+      : null,
     priorityIndicator(assessment.priority, { showLabel: !compact }),
     assessment.weighting !== null
       ? h('span', { class: 'chip', title: 'Weighting' }, `${assessment.weighting}%`)
@@ -125,7 +134,20 @@ export function renderAssessmentCard(assessment, { now, settings, compact = fals
       h(
         'div',
         { class: 'card-meta' },
-        module ? h('span', { class: 'card-module' }, module) : null,
+        module
+          ? h(
+              'span',
+              { class: 'card-module' },
+              h('span', {
+                class: [
+                  'module-dot',
+                  moduleColorClass(assessment.moduleCode ?? assessment.moduleName),
+                ],
+                'aria-hidden': 'true',
+              }),
+              module,
+            )
+          : null,
         h('span', null, categoryLabel(assessment.category, settings)),
       ),
       h('div', { class: 'card-chips' }, chips),
@@ -140,30 +162,51 @@ export function renderAssessmentCard(assessment, { now, settings, compact = fals
         h('time', { datetime: assessment.dueDate }, dueText(assessment)),
       ),
     ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'icon-button icon-button-sm card-menu-button',
+        dataset: { action: 'menu' },
+        'aria-label': `More actions for “${assessment.title}”`,
+        'aria-haspopup': 'menu',
+        'aria-expanded': 'false',
+        title: 'More actions',
+      },
+      icon('more', { size: 16 }),
+    ),
   );
 }
 
 /**
  * Render a list efficiently: cards are cached by id and only rebuilt when the
- * record object (or the day, or settings) changes, then reordered in one call.
+ * record object (or the hour, or settings) changes, then reordered in one call.
+ * Pass `groups` ([{ key, label, items }]) instead of a flat list to add headings.
  */
 export function createCardList(container, { compact = false } = {}) {
   const cache = new Map();
-  return function renderList(assessments, { now, settings, empty }) {
+  return function renderList(assessments, { now, settings, empty, groups = null }) {
     const dayKey = `${now.toDateString()}|${now.getHours()}|${settings.dueSoonDays}|${settings.customCategories.length}`;
-    const nodes = [];
     const live = new Set();
-    for (const assessment of assessments) {
+    const cardFor = (assessment) => {
       live.add(assessment.id);
       const cached = cache.get(assessment.id);
-      if (cached && cached.record === assessment && cached.dayKey === dayKey) {
-        nodes.push(cached.node);
-        continue;
-      }
+      if (cached && cached.record === assessment && cached.dayKey === dayKey) return cached.node;
       const node = renderAssessmentCard(assessment, { now, settings, compact });
       cache.set(assessment.id, { record: assessment, dayKey, node });
-      nodes.push(node);
-    }
+      return node;
+    };
+    const nodes = groups
+      ? groups.flatMap((group) => [
+          h(
+            'h3',
+            { class: ['list-group-heading', group.key === 'overdue' && 'is-overdue'] },
+            group.label,
+            h('span', { class: 'segment-count' }, String(group.items.length)),
+          ),
+          ...group.items.map(cardFor),
+        ])
+      : assessments.map(cardFor);
     for (const id of cache.keys()) if (!live.has(id)) cache.delete(id);
     if (nodes.length === 0 && empty) container.replaceChildren(empty);
     else container.replaceChildren(...nodes);

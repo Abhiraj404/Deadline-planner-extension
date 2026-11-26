@@ -5,7 +5,7 @@
  */
 
 import { categoryLabel, slugifyCategory, getCategories } from '../models/settings.js';
-import { moduleLabel } from '../models/assessment.js';
+import { RELATED_DATE_LABELS, moduleLabel } from '../models/assessment.js';
 import { getDeadlineState } from '../services/query.js';
 import { computeReminders, describeOffset, effectiveOffsets } from '../services/reminders.js';
 import { formatDate, formatInstant, formatTime } from '../utils/dates.js';
@@ -14,7 +14,6 @@ import { dueBadge, priorityIndicator } from './assessment-card.js';
 import { createDeadlineForm } from './deadline-form.js';
 import { confirmDialog, openDialog } from './dialog.js';
 import { icon } from './icons.js';
-import { checkDocument, createImportPanel, documentPicker } from './import-panel.js';
 import { showToast } from './toast.js';
 
 export async function addCategory(app, label) {
@@ -40,10 +39,9 @@ export async function addCategory(app, label) {
  */
 export function openDeadlineEditor(
   app,
-  { assessment, initial, tab = 'manual', documentRef = null, openAdvanced = false } = {},
+  { assessment, initial, tab = 'manual', openAdvanced = false } = {},
 ) {
   const mode = assessment ? 'edit' : 'create';
-  let linkedDocument = documentRef;
   const panel = h('div', { class: 'editor-panel' });
 
   function showManual(values = initial, focus = true) {
@@ -51,14 +49,13 @@ export function openDeadlineEditor(
       mode,
       initial: assessment ?? values ?? {},
       settings: app.getSettings(),
-      document: linkedDocument,
       openAdvanced,
       onAddCategory: (label) => addCategory(app, label),
       onCancel: () => handle.close(),
       onSubmit: async (value) => {
         const result = assessment
           ? await app.service.update(assessment.id, value)
-          : await app.service.create({ ...value, sourceDocument: linkedDocument });
+          : await app.service.create(value);
         if (result.ok) {
           handle.close();
           showToast(assessment ? 'Changes saved' : `Added “${result.assessment.title}”`, {
@@ -72,14 +69,39 @@ export function openDeadlineEditor(
     if (focus) form.focus();
   }
 
+  // Documents are processed on the import page, in their own tab, so a long import
+  // never depends on the popup staying open.
   function showImport() {
     panel.replaceChildren(
-      createImportPanel({
-        onContinueManually: (doc) => {
-          linkedDocument = doc;
-          selectTab('manual');
-        },
-      }),
+      h(
+        'div',
+        { class: 'import-panel' },
+        h(
+          'div',
+          { class: 'notice' },
+          h(
+            'p',
+            null,
+            'Import PDF or Word assessment briefs. Each file is read on this device, the deadline and details are found for you, and you confirm everything before it is saved.',
+          ),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn btn-primary',
+            on: {
+              click: () => {
+                handle.close();
+                app.openImportPage();
+                if (app.isExtension && document.body.classList.contains('popup')) window.close();
+              },
+            },
+          },
+          icon('upload', { size: 15 }),
+          'Open the import page',
+        ),
+      ),
     );
   }
 
@@ -178,7 +200,14 @@ const SOURCE_LABELS = {
   docx: 'Imported from Word',
 };
 
-function renderDetails(app, assessment, handle) {
+function renderDetails(app, stored, handle) {
+  // Records written by an older version may lack the Stage 2 list fields.
+  const assessment = {
+    ...stored,
+    instructions: stored.instructions ?? [],
+    markingCriteria: stored.markingCriteria ?? [],
+    relatedDates: stored.relatedDates ?? [],
+  };
   const settings = app.getSettings();
   const now = app.now();
   const state = getDeadlineState(assessment, { now, dueSoonDays: settings.dueSoonDays });
@@ -190,35 +219,84 @@ function renderDetails(app, assessment, handle) {
   const reminders = computeReminders([assessment], settings, Number(now));
   const offsets = effectiveOffsets(assessment, settings);
 
-  const picker = documentPicker(async (file) => {
-    const result = await checkDocument(file);
-    if (!result.ok) return showToast(result.error, { tone: 'danger' });
-    await app.service.attachDocument(assessment.id, result.document);
-    showToast('Document linked. Extraction will be available in a later update.');
+  // A simple editable checklist: tick, remove, or add a deliverable in place.
+  const newItem = h('input', {
+    class: 'input input-sm',
+    type: 'text',
+    maxlength: 300,
+    placeholder: 'Add a deliverable',
+    'aria-label': 'New checklist item',
   });
-
-  const checklist = assessment.checklist.length
-    ? h(
-        'ul',
-        { class: 'checklist' },
-        assessment.checklist.map((item) =>
+  const addItem = () => {
+    const text = newItem.value.trim();
+    if (!text) return;
+    app.service.update(assessment.id, {
+      checklist: [...assessment.checklist, { text, done: false }],
+    });
+  };
+  newItem.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      addItem();
+    }
+  });
+  const checklist = h(
+    'div',
+    { class: 'checklist-field' },
+    h(
+      'ul',
+      { class: 'checklist' },
+      assessment.checklist.map((item) =>
+        h(
+          'li',
+          { class: 'checklist-row' },
           h(
-            'li',
-            null,
-            h(
-              'label',
-              { class: 'checkbox-row' },
-              h('input', {
-                type: 'checkbox',
-                checked: item.done,
-                on: { change: () => app.service.toggleChecklistItem(assessment.id, item.id) },
-              }),
-              h('span', { class: item.done ? 'is-done' : '' }, item.text),
-            ),
+            'label',
+            { class: 'checkbox-row' },
+            h('input', {
+              type: 'checkbox',
+              checked: item.done,
+              on: { change: () => app.service.toggleChecklistItem(assessment.id, item.id) },
+            }),
+            h('span', { class: item.done ? 'is-done' : '' }, item.text),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'icon-button icon-button-sm',
+              'aria-label': `Remove “${item.text}”`,
+              on: {
+                click: () =>
+                  app.service.update(assessment.id, {
+                    checklist: assessment.checklist.filter((other) => other.id !== item.id),
+                  }),
+              },
+            },
+            icon('x', { size: 13 }),
           ),
         ),
-      )
+      ),
+    ),
+    h(
+      'div',
+      { class: 'inline-row' },
+      newItem,
+      h('button', { type: 'button', class: 'btn btn-sm', on: { click: addItem } }, 'Add'),
+    ),
+  );
+
+  const record = assessment.sourceDocument
+    ? (app.getState().documents ?? []).find((item) => item.id === assessment.sourceDocument.id)
     : null;
+  const evidence = record
+    ? record.evidence.filter((item) => item.assessmentId === assessment.id)
+    : [];
+  const requirements = [
+    fact('Submission method', assessment.submissionMethod),
+    fact('Word count', assessment.wordCount),
+    fact('Group size', assessment.groupSize),
+  ].filter(Boolean);
 
   const section = (title, ...content) =>
     h('section', { class: 'detail-section' }, h('h3', { class: 'detail-heading' }, title), content);
@@ -260,6 +338,17 @@ function renderDetails(app, assessment, handle) {
         },
         icon('edit', { size: 14 }),
         'Edit',
+      ),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn btn-sm',
+          'aria-pressed': String(assessment.pinned === true),
+          on: { click: () => app.service.togglePinned(assessment.id) },
+        },
+        icon('pin', { size: 14 }),
+        assessment.pinned ? 'Unpin' : 'Pin',
       ),
       h(
         'button',
@@ -314,10 +403,60 @@ function renderDetails(app, assessment, handle) {
     assessment.description
       ? section('Description', h('p', { class: 'prose' }, assessment.description))
       : null,
-    checklist
+    requirements.length
+      ? section('Submission requirements', h('dl', { class: 'facts' }, requirements))
+      : null,
+    section(
+      assessment.checklist.length
+        ? `Deliverables · ${assessment.checklist.filter((item) => item.done).length}/${assessment.checklist.length} done`
+        : 'Deliverables',
+      checklist,
+    ),
+    assessment.instructions.length
       ? section(
-          `Checklist · ${assessment.checklist.filter((item) => item.done).length}/${assessment.checklist.length}`,
-          checklist,
+          'Important instructions',
+          h(
+            'ul',
+            { class: 'plain-list' },
+            assessment.instructions.map((item) => h('li', null, item)),
+          ),
+        )
+      : null,
+    assessment.markingCriteria.length
+      ? section(
+          'Marking criteria',
+          h(
+            'details',
+            null,
+            h('summary', { class: 'link' }, `Show ${assessment.markingCriteria.length} criteria`),
+            h(
+              'ul',
+              { class: 'plain-list' },
+              assessment.markingCriteria.map((item) => h('li', null, item)),
+            ),
+          ),
+        )
+      : null,
+    assessment.relatedDates.length
+      ? section(
+          'Other dates',
+          h(
+            'ul',
+            { class: 'related-list' },
+            assessment.relatedDates.map((item) =>
+              h(
+                'li',
+                null,
+                h('strong', null, RELATED_DATE_LABELS[item.label]),
+                h(
+                  'span',
+                  null,
+                  `${formatDate(item.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}${item.time ? ` · ${formatTime(item.time)}` : ''}`,
+                ),
+                item.note ? h('span', { class: 'muted' }, item.note) : null,
+              ),
+            ),
+          ),
         )
       : null,
     assessment.notes ? section('Notes', h('p', { class: 'prose' }, assessment.notes)) : null,
@@ -351,7 +490,7 @@ function renderDetails(app, assessment, handle) {
             ),
     ),
     section(
-      'Document',
+      'Source document',
       assessment.sourceDocument
         ? h(
             'div',
@@ -372,21 +511,58 @@ function renderDetails(app, assessment, handle) {
               'Unlink',
             ),
           )
-        : h(
-            'div',
-            { class: 'inline-row' },
+        : h('p', { class: 'muted' }, 'No document is linked to this deadline.'),
+      evidence.length
+        ? h(
+            'details',
+            null,
+            h('summary', { class: 'link' }, `Show extracted evidence (${evidence.length})`),
             h(
-              'button',
-              { type: 'button', class: 'btn btn-sm', on: { click: () => picker.open() } },
-              icon('upload', { size: 14 }),
-              'Link a PDF or Word brief',
+              'ul',
+              { class: 'evidence-list' },
+              evidence.map((item) =>
+                h(
+                  'li',
+                  null,
+                  h('strong', null, `${item.label}${item.value ? `: ${item.value}` : ''}`),
+                  h('blockquote', null, item.text),
+                  item.location ? h('span', { class: 'muted' }, item.location) : null,
+                ),
+              ),
             ),
-            picker.input,
-          ),
+          )
+        : assessment.sourceDocument && !record
+          ? h(
+              'p',
+              { class: 'field-hint' },
+              'The document information was deleted from the library, so no evidence is available.',
+            )
+          : null,
+      h(
+        'div',
+        { class: 'inline-row' },
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn btn-sm',
+            on: {
+              click: () => {
+                handle.close();
+                app.openImportPage(`#attach=${encodeURIComponent(assessment.id)}`);
+              },
+            },
+          },
+          icon('upload', { size: 14 }),
+          assessment.sourceDocument
+            ? 'Import an updated brief'
+            : 'Import a brief for this deadline',
+        ),
+      ),
       h(
         'p',
         { class: 'field-hint' },
-        'Only the file name and size are saved. Reading details from the brief arrives in a later update; your own entries will never be replaced without asking.',
+        'Changes found in a brief are shown for you to approve. Your own entries, notes and progress are never replaced without asking.',
       ),
     ),
     h(

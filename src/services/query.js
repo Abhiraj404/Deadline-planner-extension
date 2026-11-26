@@ -19,10 +19,17 @@ export function getDeadlineState(assessment, { now = new Date(), dueSoonDays = 3
   const daysRemaining = daysBetween(today, assessment.dueDate);
 
   let overdue = false;
+  // Minutes left, only for timed deadlines within a day (for "Due in 3 h" countdowns).
+  let minutesLeft = null;
   if (!assessment.completed) {
-    overdue = assessment.dueTime
-      ? Number(now) > zonedDateTimeToEpoch(assessment.dueDate, assessment.dueTime, timeZone)
-      : daysRemaining < 0;
+    if (assessment.dueTime) {
+      const due = zonedDateTimeToEpoch(assessment.dueDate, assessment.dueTime, timeZone);
+      overdue = Number(now) > due;
+      const minutes = Math.ceil((due - Number(now)) / 60_000);
+      if (!overdue && minutes < 24 * 60) minutesLeft = minutes;
+    } else {
+      overdue = daysRemaining < 0;
+    }
   }
   const dueSoon = !assessment.completed && !overdue && daysRemaining <= dueSoonDays;
 
@@ -38,7 +45,8 @@ export function getDeadlineState(assessment, { now = new Date(), dueSoonDays = 3
     overdue,
     dueSoon,
     tone,
-    label: stateLabel(assessment, daysRemaining, overdue),
+    minutesLeft,
+    label: stateLabel(assessment, daysRemaining, overdue, minutesLeft),
   };
 }
 
@@ -46,9 +54,14 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 
-function stateLabel(assessment, days, overdue) {
+function stateLabel(assessment, days, overdue, minutesLeft) {
   if (assessment.completed) return 'Done';
   if (overdue) return days >= 0 ? 'Overdue' : `${plural(-days, 'day')} overdue`;
+  if (minutesLeft !== null) {
+    return minutesLeft < 60
+      ? `Due in ${minutesLeft} min`
+      : `Due in ${Math.floor(minutesLeft / 60)} h`;
+  }
   if (days === 0) return 'Due today';
   if (days === 1) return 'Tomorrow';
   if (days < 14) return `${plural(days, 'day')} left`;
@@ -143,11 +156,19 @@ const COMPARATORS = {
     deadlineKey(a).localeCompare(deadlineKey(b)),
 };
 
-/** Returns a new sorted array. Completed lists read best newest-first, so pass `descending`. */
-export function sortAssessments(assessments, sortKey = 'deadline', { descending = false } = {}) {
+/**
+ * Returns a new sorted array. Completed lists read best newest-first, so pass
+ * `descending`. With `pinnedFirst`, pinned deadlines come before the rest.
+ */
+export function sortAssessments(
+  assessments,
+  sortKey = 'deadline',
+  { descending = false, pinnedFirst = false } = {},
+) {
   const compare = COMPARATORS[sortKey] ?? COMPARATORS.deadline;
-  const sorted = assessments.slice().sort(compare);
-  return descending ? sorted.reverse() : sorted;
+  const sorted = assessments.slice().sort((a, b) => (descending ? compare(b, a) : compare(a, b)));
+  if (!pinnedFirst) return sorted;
+  return [...sorted.filter((item) => item.pinned), ...sorted.filter((item) => !item.pinned)];
 }
 
 /** Counts for the popup header plus the next open deadline. */
@@ -188,24 +209,45 @@ export function listModules(assessments) {
   return [...modules.values()].sort((a, b) => collator.compare(a.label, b.label));
 }
 
+export const TIMEFRAMES = Object.freeze([
+  { key: 'overdue', label: 'Overdue' },
+  { key: 'today', label: 'Today' },
+  { key: 'tomorrow', label: 'Tomorrow' },
+  { key: 'thisWeek', label: 'This week' },
+  { key: 'nextWeek', label: 'Next week' },
+  { key: 'later', label: 'Later' },
+  { key: 'earlier', label: 'Earlier' },
+]);
+
 /**
- * Group an already-sorted list into agenda sections: overdue first, then one
- * section per due date.
+ * Group an already-sorted list by timeframe: Overdue, Today, Tomorrow, This week, Next
+ * week, Later (and Earlier, for completed deadlines in the past). Weeks start on
+ * `weekStartsOn` (0 = Sunday, 1 = Monday) and "today" is in each deadline's time zone.
+ * Empty groups are left out.
  */
-export function groupForAgenda(assessments, context = {}) {
-  const groups = [];
-  const overdue = [];
-  const byDate = new Map();
+export function groupByTimeframe(
+  assessments,
+  { now = new Date(), dueSoonDays = 3, weekStartsOn = 1 } = {},
+) {
+  const groups = new Map(TIMEFRAMES.map((frame) => [frame.key, []]));
   for (const assessment of assessments) {
-    const state = getDeadlineState(assessment, context);
-    if (state.overdue) {
-      overdue.push(assessment);
-      continue;
-    }
-    if (!byDate.has(assessment.dueDate)) byDate.set(assessment.dueDate, []);
-    byDate.get(assessment.dueDate).push(assessment);
+    const state = getDeadlineState(assessment, { now, dueSoonDays });
+    const days = state.daysRemaining;
+    const [year, month, day] = state.today.split('-').map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    const toNextWeek = (weekStartsOn - weekday + 7) % 7 || 7;
+    let key;
+    if (state.overdue) key = 'overdue';
+    else if (days < 0) key = 'earlier';
+    else if (days === 0) key = 'today';
+    else if (days === 1) key = 'tomorrow';
+    else if (days < toNextWeek) key = 'thisWeek';
+    else if (days < toNextWeek + 7) key = 'nextWeek';
+    else key = 'later';
+    groups.get(key).push(assessment);
   }
-  if (overdue.length > 0) groups.push({ key: 'overdue', date: null, items: overdue });
-  for (const [date, items] of byDate) groups.push({ key: date, date, items });
-  return groups;
+  return TIMEFRAMES.filter((frame) => groups.get(frame.key).length).map((frame) => ({
+    ...frame,
+    items: groups.get(frame.key),
+  }));
 }

@@ -1,54 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges, createAssessment } from '../src/models/assessment.js';
-import {
-  applyDocumentChanges,
-  compareWithExtraction,
-  createDocumentReference,
-  MAX_DOCUMENT_BYTES,
-  validateDocumentFile,
-} from '../src/services/documents.js';
+import { applyDocumentChanges, compareWithExtraction } from '../src/services/documents.js';
 import { sequentialIds } from './helpers/chrome-mock.js';
 
 const now = new Date('2026-11-25T10:00:00Z');
-const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
-const ZIP = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
-
-describe('validateDocumentFile', () => {
-  it('accepts real PDF and DOCX files', () => {
-    expect(validateDocumentFile({ name: 'Brief.PDF', size: 1000 }, PDF)).toEqual({
-      ok: true,
-      sourceType: 'pdf',
-    });
-    expect(validateDocumentFile({ name: 'brief.docx', size: 1000 }, ZIP)).toEqual({
-      ok: true,
-      sourceType: 'docx',
-    });
-  });
-
-  it('rejects renamed, macro-enabled, empty, oversized and unsupported files', () => {
-    expect(validateDocumentFile({ name: 'fake.pdf', size: 10 }, ZIP).ok).toBe(false);
-    expect(validateDocumentFile({ name: 'macro.docm', size: 10 }, ZIP).error).toMatch(/docm/);
-    expect(validateDocumentFile({ name: 'empty.pdf', size: 0 }, PDF).ok).toBe(false);
-    expect(validateDocumentFile({ name: 'huge.pdf', size: MAX_DOCUMENT_BYTES + 1 }, PDF).ok).toBe(
-      false,
-    );
-    expect(validateDocumentFile({ name: 'notes.txt', size: 10 }, PDF).ok).toBe(false);
-  });
-
-  it('creates a metadata-only reference', () => {
-    const ref = createDocumentReference({ name: 'brief.pdf', size: 1234 }, 'pdf', {
-      now,
-      idFactory: () => 'doc-1',
-    });
-    expect(ref).toEqual({
-      id: 'doc-1',
-      name: 'brief.pdf',
-      type: 'pdf',
-      size: 1234,
-      attachedAt: now.toISOString(),
-    });
-  });
-});
 
 describe('attaching a document to an existing manual deadline', () => {
   const manual = () => {

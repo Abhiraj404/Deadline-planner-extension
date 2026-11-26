@@ -6,11 +6,9 @@
  */
 
 import { createCardList, emptyState, renderAssessmentCard } from '../components/assessment-card.js';
-import {
-  openDeadlineDetails,
-  openDeadlineEditor,
-  toggleComplete,
-} from '../components/deadline-dialogs.js';
+import { handleCardClick } from '../components/card-actions.js';
+import { openDeadlineDetails, openDeadlineEditor } from '../components/deadline-dialogs.js';
+import { renderLibrary } from '../components/document-library.js';
 import { icon } from '../components/icons.js';
 import { openSettings } from '../components/settings-panel.js';
 import { getCategories } from '../models/settings.js';
@@ -18,13 +16,14 @@ import { createApp } from '../services/app.js';
 import {
   filterAssessments,
   getDeadlineState,
-  groupForAgenda,
+  groupByTimeframe,
   listModules,
   sortAssessments,
   summarize,
 } from '../services/query.js';
 import { THEME_LABELS, nextTheme } from '../services/theme.js';
 import { daysBetween, formatDate, monthGrid, todayInTimeZone } from '../utils/dates.js';
+import { moduleColorClass } from '../utils/module-colors.js';
 import { debounce, h, isTypingTarget } from '../utils/dom.js';
 
 const THEME_ICONS = { system: 'system', light: 'sun', dark: 'moon' };
@@ -33,6 +32,7 @@ const STATUSES = [
   { id: 'overdue', label: 'Overdue', icon: 'alert' },
   { id: 'completed', label: 'Completed', icon: 'check' },
   { id: 'all', label: 'All deadlines', icon: 'list' },
+  { id: 'documents', label: 'Documents', icon: 'file' },
 ];
 const VIEWS = [
   { id: 'list', label: 'List', icon: 'list' },
@@ -148,7 +148,7 @@ async function main() {
           type: 'button',
           class: 'btn topbar-import',
           title: 'Import a PDF or Word brief',
-          on: { click: () => openDeadlineEditor(app, { tab: 'import' }) },
+          on: { click: () => app.openImportPage() },
         },
         icon('upload', { size: 15 }),
         h('span', { class: 'label-wide' }, 'Import document'),
@@ -326,10 +326,10 @@ async function main() {
       });
       return;
     }
-    const assessment = id && app.getAssessment(id);
-    if (!assessment) return;
-    if (target.dataset.action === 'toggle-complete') toggleComplete(app, assessment);
-    else openDeadlineDetails(app, id);
+    if (handleCardClick(app, event)) return;
+    // Calendar chips carry data-id without being inside a card.
+    if (target.dataset.action === 'open' && id && app.getAssessment(id))
+      openDeadlineDetails(app, id);
   });
 
   root.replaceChildren(
@@ -400,22 +400,27 @@ async function main() {
     return emptyState(messages[status]);
   }
 
+  // Agenda: Overdue, Today, Tomorrow, This week, Next week, Later (pinned first in each).
   function renderAgenda(items, context, settings) {
     if (items.length === 0) return body.replaceChildren(emptyFor(view.status));
-    const groups = groupForAgenda(sortAssessments(items, 'deadline'), context);
+    const sorted = sortAssessments(items, 'deadline', { pinnedFirst: true });
+    const groups = groupByTimeframe(sorted, { ...context, weekStartsOn: settings.weekStartsOn });
     const todayIso = todayInTimeZone(settings.timeZone, context.now);
     body.replaceChildren(
       ...groups.map((group) => {
-        let label;
         let sub = '';
-        if (group.key === 'overdue') label = 'Overdue';
-        else {
-          const days = daysBetween(todayIso, group.date);
-          label = formatDate(group.date, { weekday: 'long', day: 'numeric', month: 'long' });
-          if (days === 0) sub = 'Today';
-          else if (days === 1) sub = 'Tomorrow';
-          else if (days === -1) sub = 'Yesterday';
-          else if (days > 1 && days < 7) sub = `In ${days} days`;
+        if (group.key === 'today')
+          sub = formatDate(todayIso, { weekday: 'long', day: 'numeric', month: 'long' });
+        else if (group.key === 'tomorrow') {
+          const tomorrow = group.items.map((item) => item.dueDate).sort()[0];
+          sub = formatDate(tomorrow, { weekday: 'long', day: 'numeric', month: 'long' });
+        } else if (group.key !== 'overdue') {
+          const dates = group.items.map((item) => item.dueDate).sort();
+          const first = dates[0];
+          const last = dates.at(-1);
+          const days = daysBetween(todayIso, first);
+          sub = first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
+          if (group.key === 'later' && days > 0) sub += ` · from ${days} days away`;
         }
         return h(
           'section',
@@ -423,7 +428,8 @@ async function main() {
           h(
             'h3',
             { class: 'agenda-heading' },
-            label,
+            group.label,
+            h('span', { class: 'segment-count' }, String(group.items.length)),
             sub ? h('span', { class: 'agenda-sub' }, sub) : null,
           ),
           h(
@@ -566,6 +572,7 @@ async function main() {
       overdue: summary.overdue,
       completed: summary.completed,
       all: summary.total,
+      documents: (app.getState().documents ?? []).length,
     };
     for (const [id, { button, count }] of statusButtons) {
       count.textContent = String(counts[id]);
@@ -609,6 +616,10 @@ async function main() {
               'aria-current': String(view.module === module.key),
               title: module.label,
             },
+            h('span', {
+              class: ['module-dot', moduleColorClass(module.key)],
+              'aria-hidden': 'true',
+            }),
             h('span', { class: 'nav-label' }, module.label),
             h('span', { class: 'nav-count' }, String(module.open)),
           ),
@@ -655,11 +666,22 @@ async function main() {
       ? `(${summary.overdue} overdue) Deadline Reminder`
       : 'Deadline Reminder';
 
+    toolbar.querySelector('.toolbar-controls').hidden = view.status === 'documents';
+    if (view.status === 'documents') {
+      viewCount.textContent = String(counts.documents);
+      renderLibrary(body, {
+        app,
+        search: view.search,
+        onOpenDeadline: (id) => openDeadlineDetails(app, id),
+      });
+      return;
+    }
     if (view.layout === 'calendar') renderCalendar(items, context, settings);
     else if (view.layout === 'agenda') renderAgenda(items, context, settings);
     else {
       const sorted = sortAssessments(items, view.sort, {
         descending: view.status === 'completed' && view.sort === 'deadline',
+        pinnedFirst: view.status !== 'completed',
       });
       renderList(sorted, { now, settings, empty: emptyFor(view.status) });
       if (body.firstChild !== listContainer) body.replaceChildren(listContainer);
@@ -671,7 +693,11 @@ async function main() {
     if (!hash) return;
     history.replaceState(null, '', location.pathname);
     if (hash === 'settings') openSettings(app);
-    else if (hash.startsWith('deadline=')) openDeadlineDetails(app, hash.slice('deadline='.length));
+    else if (hash === 'documents') {
+      view.status = 'documents';
+      render();
+    } else if (hash.startsWith('deadline='))
+      openDeadlineDetails(app, hash.slice('deadline='.length));
   }
 
   app.onChange(render);

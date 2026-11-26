@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Deadline Reminder",
   "short_name": "Deadlines",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Track assessment and personal deadlines locally, with reminders. No accounts, no servers.",
   "minimum_chrome_version": "123",
   "icons": {

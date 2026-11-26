@@ -1,82 +1,124 @@
 # Development status
 
-Last updated: 2026-11-25 · Version 0.1.0 · **Stage 1 complete.** Stage 2 has not started.
+Last updated: 2026-11-26 · **Version 1.0.0** · Storage schema 3 ·
+**Stages 1–3 complete; release candidate ready for the owner's review.** Nothing has
+been committed, tagged, pushed or published (stages 2 and 3 are uncommitted local
+changes on top of the Stage 1 commit `da26f40`).
 
-## Stage 1: foundation, architecture and UI (done)
+## Summary of stages
 
-### Completed
+| Stage | Scope                                                                                                                          | State                   |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| 1     | Architecture, popup, dashboard, manual deadlines, storage, themes                                                              | Done (commit `da26f40`) |
+| 2     | PDF/DOCX import, extraction, review, duplicates, document library                                                              | Done (uncommitted)      |
+| 3     | Reminders, badge, quick actions, agenda, backup preview, demo data, polish, performance, security audit, release tooling, docs | Done (uncommitted)      |
 
-- MV3 extension scaffold built with Vite 8; separate entry points for popup, dashboard
-  and service worker; `dist/` is a complete unpacked extension.
-- Post-build verification (`scripts/verify-build.mjs`): manifest files exist, no inline
-  or remote scripts, no `eval`/`innerHTML`, only the expected permissions.
-- Assessment model with `sourceType`, `sourceDocument`, `extractionConfidence`,
-  `userConfirmed` and `confirmedFields`; normalisation of any input.
-- Storage service: schema version 1, safe idempotent init, migration from the legacy v0
-  shape, read-only protection for newer data, readable errors, change subscription,
-  skip-unchanged writes.
-- Manual deadlines: create (title + date only, or full form with Advanced options), edit,
-  delete with undo, complete/restore with undo, checklist toggling.
-- Popup: next deadline, upcoming / due soon / completed counts, quick add (title, date,
-  category, Enter to submit) with Advanced options, Upcoming/Completed tabs, search,
-  theme toggle, settings and dashboard links.
-- Dashboard: list, agenda and calendar views; status, module, category and source
-  filters; search; sorting; details dialog; settings dialog; hash routes
-  (`#settings`, `#deadline=<id>`); responsive from about 320 px to wide screens.
-- Categories: eight built-in plus user-defined custom categories.
-- Reminders: `chrome.alarms` + `chrome.notifications`, default and per-deadline offsets,
-  reminder time of day for date-only deadlines, automatic rescheduling on any change,
-  notification click opens the deadline.
-- Document preparation: Import Document tab and panel labelled "In development"; PDF/DOCX
-  file validation (extension, signature, size, `.docm` refused); link a document to a
-  new or existing deadline (metadata only); `compareWithExtraction` and
-  `applyDocumentChanges` ready for Stage 2.
-- Backup/restore to JSON (merge or replace), delete-all with confirmation.
-- Light, dark and system themes via `light-dark()` tokens; no theme flash.
-- Accessibility: labelled controls, visible focus, native modal dialogs, ARIA tabs and
-  live regions, text + icon urgency, reduced-motion support, keyboard shortcuts.
-- Docs: README, ARCHITECTURE, AGENTS, this file.
+## Stage 3 completed
 
-### Verification (2026-11-25)
+- **Reminders:** pure planning (`services/reminders.js`) + injected-API runner
+  (`background/reminder-runner.js`) + thin service worker. Presets 14/7/3/1 days, on the
+  deadline day, 1 hour (timed only), custom intervals; per-deadline default/custom/none.
+  Reconcile on install/update/start-up/changes/late alarms/refresh alarm; missed-reminder
+  summary (3-day window, 10-minute grace); fired-key dedupe; one notification per
+  deadline; Mark complete and Snooze buttons; click opens details; history (last 30).
+  Snooze from notification or card menu with undo. Bounded to 400 alarms.
+- **Badge:** due soon / overdue / upcoming / off, colour plus full text tooltip; updated
+  on every change and at local midnight or the next timed deadline.
+- **Popup:** grouped list (Pinned, Overdue, Today, Tomorrow, This week, Next week, Later),
+  module chips, card menu (edit, pin, snooze, details), shortcuts N, /, I, D, countdowns.
+  Dialog and menu code load on first use.
+- **Dashboard:** timeframe agenda, pinned first, module colours, details pin button.
+- **Data:** restore preview (merge/replace, no duplicates by id or content), export
+  privacy warning, typed-confirmation reset, storage usage, demo data add/remove,
+  synthetic demo briefs in `demo/briefs/`.
+- **Model:** schema 3 (`pinned`, `isDemo`), separate `reminderState` key.
+- **Release:** `npm run package` (ZIP + SHA-256, single top-level folder), third-party
+  notices shipped in the extension, version sync check, `npm run release:check`,
+  GitHub Actions CI (`.github/workflows/ci.yml`) with an artifact. No auto-publishing.
+- **Docs:** README (portfolio), SECURITY, CHANGELOG, RELEASE_NOTES, ARCHITECTURE, AGENTS.
 
-- `npm test`: 10 files, 98 tests passing.
-- `npm run lint` and `npm run format:check`: clean.
-- `npm run build`: passes verification; `dist/` is about 116 KB (16 files).
-- Browser: the built extension was loaded unpacked in **headless Microsoft Edge 158**
-  via `npm run smoke` (CDP). Checked: service worker starts and initialises storage,
-  quick add and validation, live updates via storage events, search, tabs, theme
-  switching, add form validation, safe rendering of `<script>` text, details,
-  settings, calendar/agenda, no horizontal overflow at 1280 px and 420 px, 11 alarms
-  scheduled for seeded data, persistence after reopening the popup, no console errors.
-  Screenshots are in `docs/screenshots/`.
-- **Not tested:** the real toolbar popup window (headless mode opens the popup page in a
-  tab at popup size), Google Chrome (stable Chrome 137+ ignores `--load-extension`),
-  an actual notification appearing on screen, and screen-reader output.
+### Bugs fixed in Stage 3
+
+- Details dialog crashed for records lacking Stage 2 list fields (found by the Stage 1
+  browser test).
+- Agenda "Next week" range label wrong when pinned items were first.
+- Reset could stop if IndexedDB was slow to open; storage is now reset first and the
+  file store open has an `onblocked` handler.
+- `suppliedFields` counted `false` as user-supplied (made `pinned` a confirmed field).
+- Test-only: dialogs did not finish closing in background tabs during the release test;
+  the test now brings the tab to the front.
+
+## Verification (2026-11-26, v1.0.0)
+
+- `npm run check`: ESLint and Prettier clean; **16 test files, 218 tests passing**;
+  build verification passed (manifest paths, pages, permissions, CSP, no inline/remote
+  code, no message listeners, version sync, notices present, popup/dashboard cannot
+  reach PDF.js or Mammoth).
+- `npm audit`: 0 vulnerabilities (all and production).
+- **Fresh source copy** (tracked + untracked, non-ignored files only, no
+  `node_modules`): `npm ci`, `npm test` (218 passed), `npm run build` (verified).
+- **Release ZIP** `release/deadline-reminder-v1.0.0.zip`: 696.5 KB, 32 files, no source
+  maps, no personal data (scanned), SHA-256 in the `.sha256` file.
+- **Release check** (`npm run release:check`, headless Microsoft Edge 158, ZIP extracted
+  with Windows Expand-Archive, fresh profile): 19/19 checks — permissions; demo data via
+  Settings; badge text and tooltip; refresh alarm; no overflow at 200% zoom and 320 px;
+  grouped popup; card-menu snooze created a snooze alarm; completion cancelled alarms;
+  undo restored; **a real `chrome.alarms` alarm fired and `chrome.notifications` created
+  the notification**; history recorded; restore preview showed 0 new / 9 skipped and
+  created no duplicates; removing demo data kept the real deadline; reset after typing
+  RESET; alarms cancelled; no console errors.
+- `npm run smoke:import`: 32/32 checks (unchanged from Stage 2) on the 1.0.0 build.
+- `npm run smoke`: Stage 1 UI flow, no console errors.
+
+### Performance (before → after Stage 3; synthetic data; Windows, Node 26, Edge 158 headless)
+
+| Measure                            | v0.2.0       | v1.0.0          | Notes                                                  |
+| ---------------------------------- | ------------ | --------------- | ------------------------------------------------------ |
+| Popup JS loaded up front           | 65.5 KB      | **48.4 KB**     | dialogs/menus lazy-loaded (75.4 KB before that change) |
+| Dashboard JS up front              | 88.3 KB      | 106.2 KB        | + agenda groups, menus, settings tools                 |
+| Import page JS up front            | 85.8 KB      | 87.0 KB         |                                                        |
+| `dist/` total                      | 2,181 KB     | 2,282 KB        | + 77 KB third-party notices                            |
+| Release ZIP                        | —            | 696.5 KB        |                                                        |
+| Popup load (median of 5)           | 37 ms        | 31–42 ms        | run-to-run noise is larger than the change             |
+| Dashboard load (median of 5)       | —            | 26–27 ms        |                                                        |
+| Popup / dashboard JS heap          | —            | 2.3 MB / 4.7 MB | `performance.memory`, Chromium only                    |
+| PDF 50 pages (Edge)                | 114 ms       | 111 ms          |                                                        |
+| DOCX 2,400 paragraphs (Edge)       | 88 ms        | 82 ms           |                                                        |
+| Node: PDF 1/10/50/100 pages        | 3/8/34/64 ms | 3/9/35/65 ms    | `npm run measure`                                      |
+| Node: DOCX 20/500/2,400 paragraphs | 5/10/32 ms   | 5/10/33 ms      |                                                        |
+| Storage after import test          | 25.3 KB      | 25.6 KB         | ≈3.8 KB per library record                             |
+| Service worker                     | event-driven | event-driven    | no timers/polling; one refresh alarm                   |
+
+Limitations: headless timings, small synthetic files, one machine; not comparable to a
+real toolbar popup on a slower device.
+
+### Browser compatibility
+
+| Browser                                                             | Result                                                                                                                             |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Microsoft Edge 158 (headless, Windows)                              | All automated browser checks pass                                                                                                  |
+| Google Chrome                                                       | **Not tested** — not installed in this environment (also, Chrome 137+ ignores `--load-extension`, so the automated tests use Edge) |
+| Real toolbar popup window, visible OS notifications, screen readers | **Not tested** (headless environment)                                                                                              |
 
 ## Known limitations
 
-- Reminders fire only while the browser is running.
-- No automatic extraction from PDF/DOCX yet (Stage 2).
-- No sync between devices; use backup/restore.
-- No dedicated "review and approve changes" UI yet for extracted data (the logic exists
-  and is tested; the dialog is Stage 2 work).
-- Notifications cannot be snoozed.
+- Reminders require the browser to run; alarms may be minutes late; missed reminders
+  older than 3 days are dropped.
+- No OCR; DOCX headers/footers/footnotes not read; English, Irish/UK-style rules.
+- One browser profile, no sync; unpacked install only.
+- Module colours are automatic (hash-based), not user-chosen.
+- Notifications show deadline titles (possible lock-screen visibility).
 
-## Next: Stage 2 (not started; wait for the go-ahead)
+## Before publishing (owner actions)
 
-Suggested order, based on `CHROME_EXTENSION_PLAN.md` in the original project:
+1. Review and commit (suggested commit message in the session summary).
+2. Test once in Google Chrome by hand (Load unpacked → add a deadline with a 2-minute
+   custom reminder → confirm the notification and its buttons).
+3. Approve the MIT licence (already in `LICENSE`; dependencies are Apache-2.0, BSD-2,
+   MIT/ISC — compatible; notices shipped).
+4. Create the GitHub release with `release/deadline-reminder-v1.0.0.zip` and `.sha256`.
 
-1. Port `assessment_extraction.py` to `src/services/extraction/` as a pure module and run
-   the original `tests/fixtures/extraction_cases.json` cases in Vitest.
-2. Text readers: PDF.js for PDF (bundled locally, worker as an extension file) and a DOCX
-   reader (JSZip + DOMParser or Mammoth). Load them with dynamic `import()` from the
-   import panel only, so the popup and manual form never pay for them.
-3. Map extraction output to the `Extraction` shape documented in `services/documents.js`.
-4. Review dialog: show each difference from `compareWithExtraction` with source text and
-   confidence; let the user pick fields; call `service.applyExtraction`. For new
-   deadlines, prefill the manual form and create with `sourceType: 'pdf' | 'docx'`.
-5. Handle scanned PDFs (no text) with a clear message and a manual fallback.
-6. Decide whether to keep document files (IndexedDB) or metadata only.
+## Next (not started)
 
-Requirement to keep in every stage: the extension must remain fully usable as a manual
-deadline manager with document extraction disabled.
+Optional local OCR, reminders for presentation/exam dates, Firefox port, Chrome Web
+Store listing. Keep manual deadline management fully usable without document import.

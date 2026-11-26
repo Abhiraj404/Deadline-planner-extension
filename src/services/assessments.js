@@ -91,6 +91,13 @@ export function createAssessmentService({ storage, now = () => new Date(), idFac
     });
   }
 
+  async function togglePinned(id) {
+    return modify(id, (existing) => ({
+      ok: true,
+      ...applyChanges(existing, { pinned: !existing.pinned }, { now: now(), idFactory }),
+    }));
+  }
+
   async function setCompleted(id, completed) {
     return modify(id, (existing) => ({
       ok: true,
@@ -126,15 +133,6 @@ export function createAssessmentService({ storage, now = () => new Date(), idFac
     return true;
   }
 
-  /** Link a document reference (metadata only, no file contents) to a deadline. */
-  async function attachDocument(id, documentRef) {
-    return modify(id, (existing) => ({
-      ok: true,
-      changed: true,
-      assessment: { ...existing, sourceDocument: documentRef, updatedAt: now().toISOString() },
-    }));
-  }
-
   async function detachDocument(id) {
     return modify(id, (existing) => ({
       ok: true,
@@ -164,10 +162,10 @@ export function createAssessmentService({ storage, now = () => new Date(), idFac
     create,
     update,
     setCompleted,
+    togglePinned,
     toggleChecklistItem,
     remove,
     restore,
-    attachDocument,
     detachDocument,
     applyExtraction,
   };

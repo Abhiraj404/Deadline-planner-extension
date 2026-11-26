@@ -35,7 +35,41 @@ export const DEFAULT_SETTINGS = Object.freeze({
   defaultSort: 'deadline',
   weekStartsOn: 1,
   customCategories: Object.freeze([]),
+  /** Keep a copy of imported files in IndexedDB. Off by default: only metadata is kept. */
+  retainDocumentFiles: false,
+  /** Toolbar badge: 'dueSoon' | 'overdue' | 'upcoming' | 'off'. */
+  badgeMode: 'dueSoon',
+  /** Default snooze length from a notification, in minutes. */
+  snoozeMinutes: 60,
+  importLimits: Object.freeze({
+    maxFileSizeMB: 20,
+    maxPdfPages: 100,
+    maxTextChars: 200_000,
+    maxDocxExpandedMB: 50,
+    maxBatchSize: 10,
+  }),
 });
+
+/** Allowed range for each import limit: [minimum, maximum]. */
+export const IMPORT_LIMIT_RANGES = Object.freeze({
+  maxFileSizeMB: [1, 50],
+  maxPdfPages: [1, 500],
+  maxTextChars: [10_000, 1_000_000],
+  maxDocxExpandedMB: [5, 200],
+  maxBatchSize: [1, 50],
+});
+
+export function normalizeImportLimits(raw) {
+  const limits = {};
+  for (const [key, [min, max]] of Object.entries(IMPORT_LIMIT_RANGES)) {
+    const value = Number(raw?.[key]);
+    limits[key] =
+      Number.isInteger(value) && value >= min && value <= max
+        ? value
+        : DEFAULT_SETTINGS.importLimits[key];
+  }
+  return limits;
+}
 
 export function slugifyCategory(label) {
   return String(label)
@@ -106,6 +140,14 @@ export function normalizeSettings(raw) {
       : d.defaultPriority,
     defaultSort: SORT_KEYS.includes(input.defaultSort) ? input.defaultSort : d.defaultSort,
     weekStartsOn: input.weekStartsOn === 0 ? 0 : 1,
+    retainDocumentFiles: input.retainDocumentFiles === true,
+    badgeMode: ['dueSoon', 'overdue', 'upcoming', 'off'].includes(input.badgeMode)
+      ? input.badgeMode
+      : d.badgeMode,
+    snoozeMinutes: [60, 180, 1440].includes(input.snoozeMinutes)
+      ? input.snoozeMinutes
+      : d.snoozeMinutes,
+    importLimits: normalizeImportLimits(input.importLimits),
     customCategories,
   };
 }

@@ -3,7 +3,7 @@ import { createAssessment } from '../src/models/assessment.js';
 import {
   filterAssessments,
   getDeadlineState,
-  groupForAgenda,
+  groupByTimeframe,
   listModules,
   matchesSearch,
   sortAssessments,
@@ -127,14 +127,41 @@ describe('summaries and grouping', () => {
 
   it('groups agenda items with overdue first, then by date', () => {
     const open = sortAssessments(filterAssessments(items, { status: 'open' }, context));
-    const groups = groupForAgenda(open, context);
-    expect(groups.map((group) => group.key)).toEqual([
-      'overdue',
-      '2026-11-25',
-      '2026-11-27',
-      '2026-12-01',
-      '2027-01-15',
+    // 25 Nov 2026 is a Wednesday; weeks start on Monday.
+    const groups = groupByTimeframe(open, { ...context, weekStartsOn: 1 });
+    expect(groups.map((group) => [group.label, group.items.length])).toEqual([
+      ['Overdue', 2],
+      ['Today', 1],
+      ['This week', 1],
+      ['Next week', 1],
+      ['Later', 1],
     ]);
-    expect(groups[0].items).toHaveLength(2);
+    const sundayWeeks = groupByTimeframe(open, { ...context, weekStartsOn: 0 });
+    expect(sundayWeeks.find((group) => group.key === 'nextWeek').items[0].dueDate).toBe(
+      '2026-12-01',
+    );
+  });
+
+  it('groups tomorrow separately and completed past deadlines as earlier', () => {
+    const tomorrow = make({ title: 'Tomorrow', dueDate: '2026-11-26' });
+    const done = { ...make({ title: 'Done', dueDate: '2026-11-01' }), completed: true };
+    expect(groupByTimeframe([tomorrow, done], context).map((group) => group.key)).toEqual([
+      'tomorrow',
+      'earlier',
+    ]);
+  });
+
+  it('puts pinned deadlines first when asked', () => {
+    const pinned = { ...make({ title: 'Pinned later', dueDate: '2027-02-01' }), pinned: true };
+    const sorted = sortAssessments([...items, pinned], 'deadline', { pinnedFirst: true });
+    expect(sorted[0].title).toBe('Pinned later');
+    expect(sortAssessments([...items, pinned], 'deadline')[0].title).not.toBe('Pinned later');
+  });
+
+  it('counts down hours for timed deadlines due within a day', () => {
+    const soon = make({ title: 'Soon', dueDate: '2026-11-25', dueTime: '13:30' });
+    expect(getDeadlineState(soon, context).label).toBe('Due in 3 h');
+    const verySoon = make({ title: 'Very soon', dueDate: '2026-11-25', dueTime: '10:20' });
+    expect(getDeadlineState(verySoon, context).label).toBe('Due in 20 min');
   });
 });

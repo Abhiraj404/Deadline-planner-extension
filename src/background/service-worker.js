@@ -1,79 +1,70 @@
 /**
  * Background service worker (Manifest V3).
  *
- * It is event-driven: Chrome starts it for an install, a browser start-up, a
- * storage change, an alarm or a notification click, and stops it when idle. There
- * is no polling and nothing kept in memory between events. All listeners are
- * registered synchronously at the top level, which MV3 requires for them to wake
- * the worker.
+ * Event-driven: Chrome starts it for an install or update, a browser start-up, a
+ * storage change, an alarm or a notification action, and stops it when idle. There is
+ * no polling and no state in memory between events. Listeners are registered
+ * synchronously at the top level, which MV3 requires for them to wake the worker.
+ *
+ * The worker handles no runtime messages: pages and the worker communicate only
+ * through chrome.storage, so there is no message channel for websites or other
+ * extensions to abuse.
  */
 
+import { createReminderRunner } from './reminder-runner.js';
 import { createStorage } from '../services/storage.js';
-import {
-  computeReminders,
-  parseAlarmName,
-  reminderMessage,
-  syncAlarms,
-} from '../services/reminders.js';
 
 const storage = createStorage(chrome.storage.local, {
   addListener: (fn) =>
     chrome.storage.onChanged.addListener((changes, area) => area === 'local' && fn(changes)),
 });
 
-async function rescheduleAll() {
-  try {
-    const { assessments, settings } = await storage.getState();
-    const result = await syncAlarms(chrome.alarms, computeReminders(assessments, settings));
-    if (result.created || result.cleared) {
-      console.info(
-        `Deadline Reminder: ${result.created} reminders set, ${result.cleared} cleared.`,
-      );
+const runner = createReminderRunner({
+  storage,
+  alarms: chrome.alarms,
+  notifications: chrome.notifications,
+  action: chrome.action,
+  iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+  openTab: (path) => chrome.tabs.create({ url: chrome.runtime.getURL(path) }),
+});
+
+const safely =
+  (task) =>
+  async (...args) => {
+    try {
+      await task(...args);
+    } catch (error) {
+      console.error('Deadline Reminder:', error);
     }
-  } catch (error) {
-    console.error('Deadline Reminder: could not schedule reminders', error);
-  }
-}
+  };
 
-function dashboardUrl(assessmentId) {
-  const base = chrome.runtime.getURL('dashboard/dashboard.html');
-  return assessmentId ? `${base}#deadline=${encodeURIComponent(assessmentId)}` : base;
-}
+// Install and update: alarms may not survive an update, so rebuild them all.
+// Missed reminders are not reported on first install.
+chrome.runtime.onInstalled.addListener(
+  safely((details) => runner.reconcile({ reportMissed: details.reason !== 'install' })),
+);
 
-chrome.runtime.onInstalled.addListener(() => {
-  rescheduleAll();
-});
+// Browser start-up: alarms are not guaranteed to persist; reconcile and summarise
+// anything missed while the browser was closed.
+chrome.runtime.onStartup.addListener(safely(() => runner.reconcile()));
 
-// Alarms are not guaranteed to survive browser restarts or extension updates.
-chrome.runtime.onStartup.addListener(() => {
-  rescheduleAll();
-});
+// Deadline, settings or snooze changes from any page reschedule automatically.
+// The worker's own bookkeeping (fired keys, history) is ignored to avoid loops.
+let lastSnoozes = null;
+storage.subscribe(
+  safely(async (update) => {
+    if (update.reminderState) {
+      const snoozes = JSON.stringify(update.reminderState.snoozes);
+      const changed = snoozes !== lastSnoozes;
+      lastSnoozes = snoozes;
+      if (!changed && !update.assessments && !update.settings) return;
+    }
+    await runner.reconcile();
+  }),
+);
 
-// Any change to deadlines or settings (from the popup, dashboard or a restore)
-// reschedules reminders, so edited due dates are picked up automatically.
-storage.subscribe(() => {
-  rescheduleAll();
-});
-
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  const parsed = parseAlarmName(alarm.name);
-  if (!parsed) return;
-  const { assessments, settings } = await storage.getState();
-  const assessment = assessments.find((item) => item.id === parsed.assessmentId);
-  if (!assessment || assessment.completed || !settings.notificationsEnabled) return;
-
-  const { title, message } = reminderMessage(assessment, parsed.offset);
-  chrome.notifications.create(`${alarm.name}:${Date.now()}`, {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
-    title,
-    message,
-    priority: assessment.priority === 'high' ? 2 : 0,
-  });
-});
-
-chrome.notifications.onClicked.addListener((notificationId) => {
-  const parsed = parseAlarmName(notificationId.replace(/:\d+$/, ''));
-  chrome.tabs.create({ url: dashboardUrl(parsed?.assessmentId) });
-  chrome.notifications.clear(notificationId);
-});
+chrome.alarms.onAlarm.addListener(safely((alarm) => runner.handleAlarm(alarm)));
+chrome.notifications.onButtonClicked.addListener(
+  safely((id, index) => runner.handleButton(id, index)),
+);
+chrome.notifications.onClicked.addListener(safely((id) => runner.handleClick(id)));

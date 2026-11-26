@@ -7,12 +7,22 @@
  */
 
 import { isValidISODate, isValidTime, isValidTimeZone } from './dates.js';
-import { PRIORITIES, normalizeChecklist, normalizeTags } from '../models/assessment.js';
+import {
+  PRIORITIES,
+  RELATED_DATE_LABELS,
+  normalizeChecklist,
+  normalizeRelatedDates,
+  normalizeTags,
+  normalizeTextList,
+} from '../models/assessment.js';
 import { MAX_REMINDER_OFFSET_MINUTES } from '../models/settings.js';
 
 const LIMITS = Object.freeze({
   title: 200,
   moduleName: 120,
+  submissionMethod: 200,
+  wordCount: 80,
+  groupSize: 80,
   moduleCode: 30,
   description: 5000,
   notes: 5000,
@@ -73,7 +83,15 @@ export function validateAssessmentInput(input = {}, { categoryIds } = {}) {
     else value.timeZone = input.timeZone;
   }
 
-  for (const field of ['moduleName', 'moduleCode', 'description', 'notes']) {
+  for (const field of [
+    'moduleName',
+    'moduleCode',
+    'description',
+    'notes',
+    'submissionMethod',
+    'wordCount',
+    'groupSize',
+  ]) {
     const fieldValue = optionalText(input[field]);
     if (fieldValue !== null && fieldValue.length > LIMITS[field]) {
       errors[field] = `Keep this under ${LIMITS[field]} characters.`;
@@ -131,6 +149,19 @@ export function validateAssessmentInput(input = {}, { categoryIds } = {}) {
 
   value.tags = normalizeTags(input.tags ?? []);
   value.checklist = normalizeChecklist(input.checklist ?? []);
+  value.instructions = normalizeTextList(input.instructions ?? []);
+  value.markingCriteria = normalizeTextList(input.markingCriteria ?? []);
+
+  const relatedDates = Array.isArray(input.relatedDates) ? input.relatedDates : [];
+  const badDate = relatedDates.find(
+    (item) =>
+      !isValidISODate(item?.date) ||
+      (item.time && !isValidTime(item.time)) ||
+      (item.label && !Object.hasOwn(RELATED_DATE_LABELS, item.label)),
+  );
+  if (badDate)
+    errors.relatedDates = 'Each related date needs a real date (and a valid time if given).';
+  value.relatedDates = normalizeRelatedDates(relatedDates);
 
   if (input.completed !== undefined) value.completed = input.completed === true;
 

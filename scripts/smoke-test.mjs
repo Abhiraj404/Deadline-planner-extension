@@ -12,9 +12,10 @@
  * Set BROWSER_PATH to use another Chromium build (e.g. Chromium or Chrome for Testing).
  * Uses a throwaway profile; your normal browser profile is never touched.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const CANDIDATES = [
@@ -35,8 +36,8 @@ const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 const OUT = process.argv[2] ?? fileURLToPath(new URL('../smoke-output', import.meta.url));
 mkdirSync(OUT, { recursive: true });
 const PORT = 9333;
-const profile = join(OUT, 'profile');
-rmSync(profile, { recursive: true, force: true });
+// A throwaway browser profile in the temp directory, removed at the end.
+const profile = join(tmpdir(), `deadline-reminder-smoke-${process.pid}`);
 mkdirSync(profile, { recursive: true });
 
 const browser = spawn(EDGE, [
@@ -249,9 +250,9 @@ try {
   // Open add dialog in dark mode
   await evaluate(
     pc,
-    `(async () => { document.querySelector('.popup-actions .btn:not(.add-button)').click(); await new Promise(r=>setTimeout(r,300)); return !!document.querySelector('dialog[open]'); })()`,
-  ).then((t) => log('import dialog open:', t));
-  await shot(pc, '04-popup-import-dark', 380, 600);
+    `(async () => { document.querySelector('.add-button').click(); await new Promise(r=>setTimeout(r,200)); [...document.querySelectorAll('.quick-actions .btn')].find((b) => b.textContent === 'Advanced options').click(); await new Promise(r=>setTimeout(r,300)); return !!document.querySelector('dialog[open]'); })()`,
+  ).then((t) => log('advanced form dialog open:', t));
+  await shot(pc, '04-popup-form-dark', 380, 600);
   await evaluate(pc, `document.querySelector('dialog[open]').close()`);
 
   // Dashboard
@@ -386,4 +387,17 @@ try {
   process.exitCode = 1;
 } finally {
   browser.kill();
+  if (process.platform === 'win32') {
+    // Edge re-parents its helper processes, so stop every process using this profile.
+    spawnSync('powershell', [
+      '-NoProfile',
+      '-Command',
+      `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*${basename(profile)}*' } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }`,
+    ]);
+  }
+  try {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  } catch {
+    // Windows may hold a lock briefly; the folder is in the temp directory.
+  }
 }

@@ -5,7 +5,7 @@ import {
   BACKUP_FORMAT,
   backupFileName,
   createBackup,
-  mergeAssessments,
+  planRestore,
   parseBackup,
 } from '../src/services/backup.js';
 import { sequentialIds } from './helpers/chrome-mock.js';
@@ -70,18 +70,48 @@ describe('backup and restore', () => {
     expect(parsed.assessments[0]).toMatchObject({ dueDate: '2026-12-01', moduleName: 'Maths' });
   });
 
-  it('merges by id with the newest copy winning, or replaces everything', () => {
+  it('previews a merge: adds new, updates newer, skips duplicates by id and content', () => {
     const newer = { ...manual, title: 'Edited later', updatedAt: '2026-12-01T00:00:00.000Z' };
     const other = createAssessment(
       { title: 'Other', dueDate: '2026-12-20' },
       { now, idFactory: ids },
     );
-    expect(mergeAssessments([manual], [newer, other]).map((item) => item.title)).toEqual([
-      'Edited later',
-      'Other',
-    ]);
-    expect(mergeAssessments([newer], [manual]).map((item) => item.title)).toEqual(['Edited later']);
-    expect(mergeAssessments([manual], [other], 'replace')).toEqual([other]);
+    const recreated = createAssessment(
+      { title: 'Other', dueDate: '2026-12-20' },
+      { now, idFactory: ids },
+    );
+    const plan = planRestore([manual, recreated], [newer, other]);
+    expect(plan.update.map((item) => item.title)).toEqual(['Edited later']);
+    expect(plan.add).toEqual([]);
+    expect(plan.duplicates.map((item) => item.title)).toEqual(['Other']); // same content, new id
+    expect(plan.result).toHaveLength(2);
+    // Restoring the same backup twice changes nothing.
+    const again = planRestore(plan.result, [newer, other]);
+    expect(again.add).toEqual([]);
+    expect(again.update).toEqual([]);
+  });
+
+  it('keeps the current copy when it is newer than the backup', () => {
+    const older = { ...manual, title: 'Old copy', updatedAt: '2020-01-01T00:00:00.000Z' };
+    const plan = planRestore([manual], [older]);
+    expect(plan.unchanged).toBe(1);
+    expect(plan.result[0].title).toBe('Manual essay');
+  });
+
+  it('previews a replace and does not duplicate library records on merge', () => {
+    const other = createAssessment(
+      { title: 'Other', dueDate: '2026-12-20' },
+      { now, idFactory: ids },
+    );
+    const plan = planRestore([manual], [other], 'replace');
+    expect(plan.remove).toEqual([manual]);
+    expect(plan.result).toEqual([other]);
+    const doc = { id: 'd1', hash: 'a'.repeat(64) };
+    const merged = planRestore([], [], 'merge', {
+      currentDocuments: [doc],
+      incomingDocuments: [doc, { id: 'd2', hash: 'a'.repeat(64) }],
+    });
+    expect(merged.documents.add).toBe(0);
   });
 
   it('names backup files by date', () => {

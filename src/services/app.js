@@ -27,6 +27,10 @@ export async function createApp() {
   });
 
   const extension = isExtensionContext();
+  const openPage = (path) => {
+    if (extension) chrome.tabs.create({ url: chrome.runtime.getURL(path) });
+    else window.open(`/${path}`, '_blank', 'noopener');
+  };
 
   return {
     storage,
@@ -42,11 +46,14 @@ export async function createApp() {
     },
     /** Open the full dashboard in a normal tab, optionally at a hash such as "#settings". */
     openDashboard(hash = '') {
-      if (extension) {
-        chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard/dashboard.html${hash}`) });
-      } else {
-        window.open(`/dashboard/dashboard.html${hash}`, '_blank', 'noopener');
-      }
+      openPage(`dashboard/dashboard.html${hash}`);
+    },
+    /**
+     * Open the document import page in its own tab. Imports run there, not in the
+     * popup, so closing the popup never interrupts processing.
+     */
+    openImportPage(hash = '') {
+      openPage(`import/import.html${hash}`);
     },
   };
 }

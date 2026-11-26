@@ -5,19 +5,44 @@
  *   schemaVersion  number               current shape version (see migrations.js)
  *   assessments    Assessment[]         every deadline, manual and imported
  *   settings       Settings             user preferences
+ *   documents      DocumentRecord[]     imported-document library (metadata + evidence)
+ *   reminderState  ReminderState        snoozes, fired-reminder keys, notification history
  *
  * Document binaries are never stored here. chrome.storage.local has a 10 MB quota and
- * is meant for small JSON values; Stage 2 will keep files in IndexedDB if needed.
+ * is meant for small JSON values; original files are kept (only when the user opts
+ * in) in IndexedDB by services/file-store.js.
  */
 
 import { CURRENT_SCHEMA_VERSION, migrateSnapshot } from './migrations.js';
+import { normalizeDocumentRecord } from '../models/document.js';
 import { normalizeSettings } from '../models/settings.js';
 
 export const KEYS = Object.freeze({
   schemaVersion: 'schemaVersion',
   assessments: 'assessments',
   settings: 'settings',
+  documents: 'documents',
+  reminderState: 'reminderState',
 });
+
+/** Always returns a complete, well-typed reminder state. */
+export function normalizeReminderState(raw) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  const numberMap = (value) =>
+    Object.fromEntries(
+      Object.entries(value && typeof value === 'object' ? value : {}).filter(
+        ([key, at]) => typeof key === 'string' && Number.isFinite(at),
+      ),
+    );
+  return {
+    lastCheckedAt: Number.isFinite(input.lastCheckedAt) ? input.lastCheckedAt : null,
+    fired: numberMap(input.fired),
+    snoozes: numberMap(input.snoozes),
+    history: Array.isArray(input.history)
+      ? input.history.filter((entry) => entry && typeof entry === 'object').slice(0, 30)
+      : [],
+  };
+}
 
 export class StorageError extends Error {
   constructor(message, cause) {
@@ -163,11 +188,72 @@ export function createStorage(area = resolveStorageArea(), events = undefined) {
 
   async function getState() {
     await init();
-    const stored = await safeGet([KEYS.assessments, KEYS.settings]);
+    const stored = await safeGet([
+      KEYS.assessments,
+      KEYS.settings,
+      KEYS.documents,
+      KEYS.reminderState,
+    ]);
     return {
       assessments: Array.isArray(stored.assessments) ? stored.assessments : [],
       settings: normalizeSettings(stored.settings),
+      documents: Array.isArray(stored.documents) ? stored.documents : [],
+      reminderState: normalizeReminderState(stored.reminderState),
     };
+  }
+
+  /**
+   * Reminder bookkeeping, kept apart from deadlines so reminder activity never rewrites
+   * deadline records: { lastCheckedAt, fired: {key: ms}, history: [], snoozes: {id: ms} }.
+   */
+  async function getReminderState() {
+    await init();
+    const { reminderState } = await safeGet([KEYS.reminderState]);
+    return normalizeReminderState(reminderState);
+  }
+
+  async function updateReminderState(mutator) {
+    const current = await getReminderState();
+    const next = await mutator(current);
+    if (next === current || next === undefined) return current;
+    await safeSet({ [KEYS.reminderState]: normalizeReminderState(next) });
+    return next;
+  }
+
+  async function getDocuments() {
+    await init();
+    const { documents } = await safeGet([KEYS.documents]);
+    return Array.isArray(documents) ? documents : [];
+  }
+
+  async function updateDocuments(mutator) {
+    const current = await getDocuments();
+    const next = await mutator(current);
+    if (next === current || next === undefined) return current;
+    await safeSet({ [KEYS.documents]: next.map(normalizeDocumentRecord).filter(Boolean) });
+    return next;
+  }
+
+  /**
+   * Change deadlines and the document library together in one write, so an import
+   * never leaves a deadline pointing at a document record that was not saved.
+   * `mutator({ assessments, documents })` returns the new pair (or the same objects).
+   */
+  async function updateLibrary(mutator) {
+    await init();
+    const stored = await safeGet([KEYS.assessments, KEYS.documents]);
+    const current = {
+      assessments: Array.isArray(stored.assessments) ? stored.assessments : [],
+      documents: Array.isArray(stored.documents) ? stored.documents : [],
+    };
+    const next = await mutator(current);
+    const items = {};
+    if (next.assessments !== current.assessments) items[KEYS.assessments] = next.assessments;
+    if (next.documents !== current.documents) {
+      items[KEYS.documents] = next.documents.map(normalizeDocumentRecord).filter(Boolean);
+    }
+    if (Object.keys(items).length > 0) await safeSet(items);
+    return next;
   }
 
   async function saveAssessments(assessments) {
@@ -193,21 +279,27 @@ export function createStorage(area = resolveStorageArea(), events = undefined) {
     return next;
   }
 
-  async function replaceAll({ assessments, settings }) {
+  async function replaceAll({ assessments, settings, documents, reminderState }) {
     await init();
     await safeSet({
       [KEYS.schemaVersion]: CURRENT_SCHEMA_VERSION,
       [KEYS.assessments]: assessments,
       [KEYS.settings]: normalizeSettings(settings),
+      ...(documents ? { [KEYS.documents]: documents } : {}),
+      ...(reminderState ? { [KEYS.reminderState]: normalizeReminderState(reminderState) } : {}),
     });
   }
 
-  /** Call `listener({ assessments?, settings? })` whenever another page changes storage. */
+  /** Call `listener({ assessments?, settings?, documents? })` whenever another page changes storage. */
   function subscribe(listener) {
     changeSource?.addListener((changes) => {
       const update = {};
       if (KEYS.assessments in changes) update.assessments = changes.assessments.newValue ?? [];
       if (KEYS.settings in changes) update.settings = normalizeSettings(changes.settings.newValue);
+      if (KEYS.documents in changes) update.documents = changes.documents.newValue ?? [];
+      if (KEYS.reminderState in changes) {
+        update.reminderState = normalizeReminderState(changes.reminderState.newValue);
+      }
       if (Object.keys(update).length > 0) listener(update);
     });
   }
@@ -220,6 +312,11 @@ export function createStorage(area = resolveStorageArea(), events = undefined) {
     saveAssessments,
     saveSettings,
     updateAssessments,
+    getDocuments,
+    updateDocuments,
+    updateLibrary,
+    getReminderState,
+    updateReminderState,
     replaceAll,
     subscribe,
     get readOnly() {

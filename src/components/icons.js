@@ -82,6 +82,15 @@ const ICONS = {
     ['path', { d: 'M12 4v11M7.5 10.5 12 15l4.5-4.5' }],
     ['path', { d: 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4' }],
   ],
+  pin: [
+    ['path', { d: 'M9 4h6l-1 6 3 3H7l3-3Z' }],
+    ['path', { d: 'M12 13v7' }],
+  ],
+  more: [
+    ['circle', { cx: 5.5, cy: 12, r: 1.2 }],
+    ['circle', { cx: 12, cy: 12, r: 1.2 }],
+    ['circle', { cx: 18.5, cy: 12, r: 1.2 }],
+  ],
   inbox: [
     ['path', { d: 'M3.5 13 6 5h12l2.5 8v6h-17Z' }],
     ['path', { d: 'M3.5 13H9l1 2h4l1-2h5.5' }],

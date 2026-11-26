@@ -12,3 +12,5 @@ Thumbs.db
 .env
 .claude/settings.local.json
 smoke-output/
+fixtures-output/
+release/
