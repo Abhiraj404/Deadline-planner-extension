@@ -72,7 +72,7 @@ you (showing exactly where each detail came from), and nudges you at sensible ti
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Microsoft Edge 123+                             | Tested (headless Edge 158 with the unpacked release build)                                                                         |
 | Google Chrome 123+                              | Expected to work (same Chromium extension APIs); **not tested in this release** because Chrome was not available in the test setup |
-| Other Chromium browsers (Brave, Vivaldi, Opera) | Not tested                                                                                                                         |
+| Other Chromium browsers (Brave, Vivaldi, Opera) | Tested works in Brave and OperaGX                                                                                                                        |
 
 Firefox and Safari are not supported.
 
